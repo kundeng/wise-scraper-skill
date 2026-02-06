@@ -1,5 +1,7 @@
+---
 name: wise-scraper
 description: Use when defining or validating a declarative web-scraping profile with contextual selectors, interactions, pagination/matrix logic, artifacts, or when static HTTP scraping fails or UI selectors are ambiguous.
+---
 
 # WISE Scraper
 
