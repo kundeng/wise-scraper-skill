@@ -1,0 +1,8 @@
+selectors:
+  - name: ai_extract_reviews
+    type: ai
+    parents: [root]
+    extract:
+      - type: ai
+        name: reviews
+        prompt: "Extract all user reviews, ratings, and review dates from this product page."

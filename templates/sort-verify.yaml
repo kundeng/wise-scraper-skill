@@ -1,0 +1,20 @@
+selectors:
+  - name: sort_by_rating
+    type: element
+    parents: [root]
+    context:
+      selector_exists: "table"
+    interaction:
+      - type: click
+        target: { css: "th.sortable[data-col='rating']" }
+        click_action_type: real
+      - type: wait
+        network_idle: true
+
+  - name: sorted_results
+    type: element
+    parents: [sort_by_rating]
+    context:
+      selector_exists: "th.sortable[aria-sort='descending']"
+    selector: "table.results tbody tr"
+    multiple: true

@@ -1,0 +1,13 @@
+selectors:
+  - name: description
+    type: text
+    selector: ".desc"
+    parents: [product_card]
+    extract:
+      - type: text
+        name: description
+        selector: ".desc"
+    hooks:
+      post_extract:
+        - name: ai_enrich
+          config: { task: "categorize_product" }

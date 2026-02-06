@@ -1,0 +1,14 @@
+selectors:
+  - name: pagination
+    type: pagination
+    selector: ".next-page"
+    pagination:
+      pagination_type: next
+      selector: ".next-page"
+    parents: [root]
+
+  - name: item
+    type: element
+    selector: ".item"
+    multiple: true
+    parents: [pagination]
