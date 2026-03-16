@@ -2,3 +2,6 @@ node_modules/
 dist/
 *.tmp
 .tmp_eval.js
+.kiro/
+docs/
+tests/
