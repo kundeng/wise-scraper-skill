@@ -25,13 +25,15 @@ A selector only fires when its **context** matches. It scopes to its **constrain
 ### Deployment (the whole profile)
 
 ```
-name → resources[] → outputs[]
+name → artifacts[] → resources[] → outputs[]
 ```
 
 - **`name`** — human label for this scraping job
 - **`resources`** — list of independent scraping units (think: one per site section or data source)
+- **`artifacts`** — named intermediate outputs that form a pipeline DAG (see § Artifacts below)
+- **`config`** — path to canonical config file (auto-loaded if present; see `guide.md § Config Composition`)
 - **`ai_generate`** — optional: let an AI draft the profile from a high-level goal
-- **`hooks`** / **`schedule`** — global lifecycle hooks and scheduling (rarely needed)
+- **`hooks`** / **`schedule`** — global lifecycle hooks and scheduling
 
 ### Resource (one scraping unit)
 

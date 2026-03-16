@@ -34,13 +34,18 @@ export class Engine {
 
   runResource(resource: Resource): ExtractedRecord[] {
     const selectors: Record<string, Selector> = {};
-    for (const s of resource.selectors) selectors[s.name] = s;
+    for (const s of resource.selectors ?? []) selectors[s.name] = s;
 
     const entry = resource.entry;
     const globals = resource.globals ?? {};
 
     if (globals.timeout_ms) this.browser.timeoutMs = globals.timeout_ms;
     if (globals.retries) this.browser.retries = globals.retries;
+
+    if (!entry) {
+      console.log(`[engine] Resource '${resource.name}' has no entry (assembly-only)`);
+      return [];
+    }
 
     const entryUrl =
       typeof entry.url === "string" ? entry.url : null;

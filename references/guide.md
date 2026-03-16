@@ -17,7 +17,7 @@ YAML profile  ──→  Runner  ──→  Browser  ──→  JSONL output  �
 
 **Templates** — composable fragments in `templates/*.yaml`. They are **not** a menu to pick from. Combine pieces: pagination + table-extract + sort-verify + interaction, etc. Scan them during orientation.
 
-**Hooks** — 5 extension points (post_discover, pre_extract, post_extract, pre_assemble, post_assemble) for site-specific logic the profile can't express declaratively.
+**Hooks** — 5 extension points (post_discover, pre_extract, post_extract, pre_assemble, post_assemble) for site-specific logic the profile can't express declaratively. Hooks can be global (per-resource) or per-selector.
 
 **JSONL** — the intermediate output format. One JSON object per line. Assembly into markdown/CSV/JSON is a separate step.
 

@@ -26,6 +26,7 @@ export {
 export type { Reference } from "./processing.js";
 export type {
   Deployment,
+  Artifact,
   Resource,
   Entry,
   Globals,

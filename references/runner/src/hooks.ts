@@ -9,7 +9,7 @@
  *   post_assemble  — after final output is built
  */
 
-import type { HookDef } from "./types.js";
+import type { HookDef, Hooks } from "./types.js";
 
 export type HookFn<T = unknown> = (ctx: T) => T | void;
 
@@ -61,18 +61,10 @@ export class HookRegistry {
     return ctx;
   }
 
-  loadFromConfig(hooksConfig: Record<string, HookDef[] | undefined>): void {
+  loadFromConfig(hooksConfig: Hooks): void {
     if (!hooksConfig) return;
 
-    // Schema format: { before: [...], after: [...] }
-    if (hooksConfig.before || hooksConfig.after) {
-      for (const h of hooksConfig.before ?? []) this._registerPlaceholder("pre_extract", h);
-      for (const h of hooksConfig.after ?? []) this._registerPlaceholder("post_extract", h);
-      return;
-    }
-
-    // Direct point mapping: { post_extract: [...], ... }
-    for (const [point, list] of Object.entries(hooksConfig)) {
+    for (const [point, list] of Object.entries(hooksConfig) as [string, HookDef[] | undefined][]) {
       if (!VALID_POINTS.includes(point as HookPoint)) continue;
       for (const h of list ?? []) this._registerPlaceholder(point as HookPoint, h);
     }

@@ -8,12 +8,21 @@
 export interface Deployment {
   name: string;
   resources?: Resource[];
+  artifacts?: Artifact[];
+  config?: string;
   ai_generate?: AiGenerate;
   hooks?: Hooks;
   schedule?: Schedule;
   /** Internal: set by flat-to-schema conversion */
   _output?: OutputConfig;
   _options?: Record<string, unknown>;
+}
+
+export interface Artifact {
+  name: string;
+  type: "urls" | "jsonl" | "json" | "csv" | "markdown" | "html" | "custom";
+  parent?: string;
+  description?: string;
 }
 
 export interface AiGenerate {
@@ -28,11 +37,12 @@ export interface AiGenerate {
 
 export interface Resource {
   name: string;
-  entry: Entry;
+  entry?: Entry;
   globals?: Globals;
-  selectors: Selector[];
+  selectors?: Selector[];
   inputs?: InputBinding[];
   outputs?: OutputBinding[];
+  hooks?: Hooks;
 }
 
 export interface Entry {
@@ -58,6 +68,7 @@ export interface InputBinding {
 export interface OutputBinding {
   artifact: string;
   from: string;
+  format?: "jsonl" | "json" | "csv" | "markdown" | "urls";
 }
 
 export interface Schedule {
@@ -66,9 +77,11 @@ export interface Schedule {
 }
 
 export interface Hooks {
-  before?: HookDef[];
-  after?: HookDef[];
-  [point: string]: HookDef[] | undefined;
+  post_discover?: HookDef[];
+  pre_extract?: HookDef[];
+  post_extract?: HookDef[];
+  pre_assemble?: HookDef[];
+  post_assemble?: HookDef[];
 }
 
 export interface HookDef {
@@ -103,7 +116,7 @@ export interface Selector {
   pagination?: Pagination;
   matrix?: Matrix;
   delay_ms?: number;
-  hooks?: { post_extract?: HookDef[] };
+  hooks?: { pre_extract?: HookDef[]; post_extract?: HookDef[] };
 }
 
 export interface Context {

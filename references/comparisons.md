@@ -84,7 +84,7 @@ references/runner-scrapy/      # Scrapy-based runner (same profile schema)
 
 ### Profile compatibility
 
-The key insight: **the YAML profile is the contract, not the runner**. All runners interpret the same schema fields (`resources`, `selectors`, `interaction`, `extract`, `pagination`, `matrix`). The agent picks the runner backend based on the project's requirements:
+The key insight: **the YAML profile is the contract, not the runner**. All runners interpret the same schema fields (`artifacts`, `resources`, `selectors`, `interaction`, `extract`, `pagination`, `matrix`). The agent picks the runner backend based on the project's requirements:
 
 | Need | Runner |
 |---|---|

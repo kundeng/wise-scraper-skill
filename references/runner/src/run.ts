@@ -120,6 +120,7 @@ function flatToSchema(flat: Record<string, unknown>): Deployment {
       }
     }
   }
+  if (!resource.selectors) resource.selectors = [];
   resource.selectors.push(rootSel);
 
   return {

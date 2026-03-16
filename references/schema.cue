@@ -27,11 +27,12 @@ Artifact: {
 
 Resource: {
   name: string
-  entry: Entry
+  entry?: Entry
   globals?: Globals
-  selectors: [...Selector]
+  selectors?: [...Selector]
   inputs?: [...InputBinding]
   outputs?: [...OutputBinding]
+  hooks?: Hooks
 }
 
 InputBinding: {
