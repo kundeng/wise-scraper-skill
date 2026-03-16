@@ -11,7 +11,7 @@
 export interface Scenario {
   id: string;
   name: string;
-  complexity: "single-page" | "multi-page" | "interactive" | "matrix" | "chained";
+  complexity: "single-page" | "multi-page" | "interactive" | "matrix" | "chained" | "ai-extract";
   prompt: string;
   /** Which exploit tier the agent should prefer */
   expectedTier?: 1 | 2 | 3;
@@ -251,6 +251,105 @@ Requirements:
     evidenceChecks: ["DOM", "selector", "unstructured"],
     decisionChecks: ["AI adapter", "semantic normalization", "Tier 2"],
     timeoutSeconds: 180,
+  },
+  // ----------------------------------------------------------------
+  // AI extract: product review → structured entities
+  // ----------------------------------------------------------------
+  {
+    id: "ai-review-entities",
+    name: "Extract structured entities from product reviews using AI",
+    complexity: "ai-extract",
+    prompt: `You have the wise-scraper skill installed. Extract structured product review data from revspin.net rubber review pages.
+
+Entry URL: https://revspin.net/rubber/butterfly-tenergy-05.html
+
+Requirements:
+1. Explore first with agent-browser. The page has free-form user reviews (text blobs) alongside structured rating data.
+2. Use the shipped runner + a YAML profile to capture the raw page content (title, ratings table, review text blobs).
+3. The ratings table has clear selectors — extract those with normal DOM eval (Tier 1).
+4. For the review text blobs, add an AI adapter step that normalizes each review into structured JSON:
+   { reviewer, date, rating, pros: string[], cons: string[], summary: string }
+5. The AI adapter should call a local CLI (codex or claude) with a clear contract: input=raw review HTML, output=structured JSON.
+6. Write the adapter as a hook or helper script in the project. Show the adapter contract.
+7. Explain why Tier 2 is needed: the ratings table is Tier 1, but review normalization requires AI.
+
+Expected output: JSONL with both structured ratings and normalized review entities.`,
+    expectedTier: 2,
+    expectedArtifacts: ["profile.yaml"],
+    profileChecks: ["extract:", "selectors:"],
+    evidenceChecks: ["review", "DOM", "selector"],
+    decisionChecks: ["Tier 2", "AI adapter", "normalization"],
+    timeoutSeconds: 300,
+  },
+
+  // ----------------------------------------------------------------
+  // AI extract: multi-step chained capture → AI normalization
+  // ----------------------------------------------------------------
+  {
+    id: "ai-chained-normalize",
+    name: "Chained multi-page capture with AI normalization step",
+    complexity: "ai-extract",
+    prompt: `You have the wise-scraper skill installed. Build a scraping project that:
+
+1. Captures multiple documentation pages from the Splunk ITSI admin section (use the shipped runner to discover TOC links and extract raw HTML from each page — this is Tier 1).
+
+Entry URL: https://help.splunk.com/en/splunk-it-service-intelligence/splunk-it-service-intelligence/administer/4.21/overview/about-administering-it-service-intelligence
+
+2. After capture, run an AI normalization step over the raw JSONL that:
+   - Reads each captured page record
+   - Uses a local AI CLI to extract a structured summary per page:
+     { page_title, topics: string[], prerequisites: string[], key_steps: string[], related_pages: string[] }
+   - Writes a normalized JSONL file
+
+3. The project should have:
+   - profile.yaml for the Tier 1 capture step
+   - An AI adapter script (TypeScript or shell) that reads the capture JSONL, calls the AI CLI per record, writes normalized output
+   - A README or inline comments explaining the two-step pipeline
+
+4. Show evidence that the capture step works with the shipped runner (Tier 1) and the normalization step needs AI (Tier 2).
+5. The AI adapter should be vendor-neutral: try codex first, fall back to claude if available.
+
+This tests chained exploitation: deterministic capture → AI enrichment.`,
+    expectedTier: 2,
+    expectedArtifacts: ["profile.yaml"],
+    profileChecks: ["resources:", "selectors:", "extract:"],
+    evidenceChecks: ["TOC", "DOM", "selector", "capture"],
+    decisionChecks: ["Tier 2", "AI", "chained", "normalization"],
+    timeoutSeconds: 360,
+  },
+
+  // ----------------------------------------------------------------
+  // AI extract: reconcile inconsistent table formats across pages
+  // ----------------------------------------------------------------
+  {
+    id: "ai-table-reconcile",
+    name: "Reconcile inconsistent table formats across pages with AI",
+    complexity: "ai-extract",
+    prompt: `You have the wise-scraper skill installed. The target site has comparison tables across multiple pages, but the table schemas vary (different column names, merged cells, footnotes inline).
+
+Target: Extract rubber comparison data from multiple revspin.net category pages:
+- https://revspin.net/rubber/short-pips.html
+- https://revspin.net/rubber/long-pips.html
+- https://revspin.net/rubber/anti-spin.html
+
+Requirements:
+1. Explore each page with agent-browser. Show evidence that the table structures differ across pages (different columns, different header text, some pages have extra columns).
+2. Use the shipped runner to capture each page's table as raw HTML or semi-structured extract (Tier 1 capture).
+3. Add an AI reconciliation step that:
+   - Takes the heterogeneous table extracts
+   - Normalizes them into a unified schema: { name, type, speed, spin, control, price, category }
+   - Handles missing fields gracefully (null or "N/A")
+4. The AI adapter should receive: raw table HTML + target schema, and return: normalized JSON rows.
+5. Write this as a post_assemble hook or standalone adapter script.
+6. Explain why this is Tier 2: individual tables are capturable with selectors, but cross-page schema reconciliation needs AI.
+
+Expected output: unified JSONL with consistent schema across all rubber types.`,
+    expectedTier: 2,
+    expectedArtifacts: ["profile.yaml"],
+    profileChecks: ["resources:", "extract:"],
+    evidenceChecks: ["table", "DOM", "selector", "column"],
+    decisionChecks: ["Tier 2", "reconcil", "AI", "schema"],
+    timeoutSeconds: 360,
   },
 ];
 

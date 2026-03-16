@@ -54,7 +54,7 @@ interface TestArgs {
 
 function parseArgs(argv: string[]): TestArgs {
   const args: TestArgs = {
-    agent: "all",
+    agent: "codex",
     scenario: null,
     list: false,
     check: false,
@@ -194,7 +194,7 @@ function runScenario(
   verbose: boolean,
 ): AgentResult {
   const start = Date.now();
-  const scenarioDir = resolve(outputDir, `${agent.name}_${scenario.id}`);
+  const scenarioDir = resolve(outputDir, `${agent.name}_${scenario.id}`, "sandbox");
   if (!existsSync(scenarioDir)) mkdirSync(scenarioDir, { recursive: true });
 
   console.log(`  [${agent.name}] Running scenario: ${scenario.name}`);
@@ -295,8 +295,9 @@ function runScenario(
     error: errors.length > 0 ? errors.join("; ") : undefined,
   };
 
-  // Write result
-  const resultPath = join(scenarioDir, "_result.json");
+  // Write result to parent dir (outside sandbox) so it doesn't mix with agent output
+  const resultDir = resolve(scenarioDir, "..");
+  const resultPath = join(resultDir, "_result.json");
   writeFileSync(resultPath, JSON.stringify(result, null, 2), "utf-8");
 
   const status = success ? "✓ PASS" : "✗ FAIL";
