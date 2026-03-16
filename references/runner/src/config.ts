@@ -13,6 +13,7 @@
  * via CLI: `--set inputs.queries=[axx,bxx,cxx]`
  *
  * Config resolution order (later wins):
+ *   0. Canonical config (wise.config.yaml or .wiserc.yaml — auto-loaded if present)
  *   1. Schema defaults
  *   2. Base profile YAML
  *   3. Override YAML files (--config extras)
@@ -141,6 +142,19 @@ export function loadConfig(argv: string[]): ResolvedConfig {
     conf.set("profile", positional[0]);
   }
 
+  // Auto-load canonical config if it exists (lowest priority — everything merges on top)
+  const canonicalPaths = ["wise.config.yaml", ".wiserc.yaml"];
+  let baseConfig: Record<string, unknown> = {};
+  for (const cp of canonicalPaths) {
+    const absCanonical = resolve(cp);
+    if (existsSync(absCanonical)) {
+      const raw = readFileSync(absCanonical, "utf-8");
+      baseConfig = (yaml.load(raw) as Record<string, unknown>) ?? {};
+      console.log(`[config] Auto-loaded canonical config: ${absCanonical}`);
+      break; // use the first one found
+    }
+  }
+
   // Load the primary profile YAML
   const profilePath = conf.get("profile");
   let profileData: Record<string, unknown> = {};
@@ -148,6 +162,11 @@ export function loadConfig(argv: string[]): ResolvedConfig {
   if (profilePath && existsSync(resolve(profilePath))) {
     const raw = readFileSync(resolve(profilePath), "utf-8");
     profileData = (yaml.load(raw) as Record<string, unknown>) ?? {};
+  }
+
+  // Merge: canonical config (base) ← profile YAML (wins)
+  if (Object.keys(baseConfig).length > 0) {
+    profileData = deepmerge(baseConfig, profileData) as Record<string, unknown>;
   }
 
   // Apply runner-level settings from profile if present

@@ -122,13 +122,36 @@ A selector with `type: matrix` enumerates all combinations of filter/search axes
 - **`auto_discover`**: if true, discovers dropdown options from the live DOM
 - The runner executes every combination and collects results
 
-### Artifacts (chaining resources)
+### Hooks (per-selector)
 
-Resources can chain: one resource's `outputs` become another's `inputs`. This is how you build multi-step pipelines — e.g., discover URLs in resource 1, extract content in resource 2.
+In addition to global hooks (per-resource), selectors can declare their own hooks:
 
-- **`outputs`**: `{ artifact: "name", from: "selector_name" }` — names the data produced by a selector
-- **`inputs`**: `{ name: "urls", artifact: "name" }` — binds a named artifact as input
-- **`entry.url`** can reference an artifact instead of a literal URL
+- **`hooks.pre_extract`** — runs before this selector extracts (e.g., inject auth token)
+- **`hooks.post_extract`** — runs after this selector extracts (e.g., AI normalization on just this selector's output)
+
+Per-selector hooks fire only when that specific selector produces output. Use them when only one part of the pipeline needs enrichment. See `guide.md § Hook System` for details.
+
+### Artifacts (named intermediate outputs)
+
+Artifacts are the **named, typed outputs** of a scraping pipeline. They form a **hierarchy** — each artifact can declare a parent, creating a DAG that the runner resolves and executes in dependency order.
+
+- **`artifacts[]`** — declared at the deployment level, defines the pipeline's output structure
+- **`name`** — unique identifier (referenced by resources via `inputs` / `outputs`)
+- **`type`** — `urls`, `jsonl`, `json`, `csv`, `markdown`, `html`, `custom`
+- **`parent`** — optional parent artifact name (creates dependency: this artifact requires the parent to be produced first)
+- **`description`** — human-readable purpose
+
+**How artifacts chain resources:**
+
+- A resource's **`outputs`** declares which artifact it produces and from which selector: `{ artifact: "name", from: "selector_name", format: "jsonl" }`
+- A resource's **`inputs`** binds a named artifact: `{ name: "urls", artifact: "discovered_urls" }`
+- **`entry.url`** can reference an artifact instead of a literal URL: `{ artifact: "discovered_urls" }`
+
+**Flat pipeline** (one artifact): resource extracts rows → produces a single JSONL artifact.
+
+**Hierarchical pipeline** (multiple artifacts): resource 1 discovers URLs → resource 2 extracts pages → resource 3 assembles markdown. Each step produces a named artifact that feeds the next.
+
+See `guide.md § Named Artifacts` for worked examples with both patterns.
 
 ## The Selector Tree
 

@@ -3,6 +3,8 @@ package wise
 Deployment: {
   name: string
   resources?: [...Resource]
+  artifacts?: [...Artifact]
+  config?: string             // canonical config path (auto-loaded if exists)
   ai_generate?: {
     enabled: bool | *true
     goal: string
@@ -14,6 +16,13 @@ Deployment: {
   }
   hooks?: Hooks
   schedule?: Schedule
+}
+
+Artifact: {
+  name: string                // unique artifact name
+  type: "urls" | "jsonl" | "json" | "csv" | "markdown" | "html" | "custom"
+  parent?: string             // parent artifact name (forms hierarchy)
+  description?: string
 }
 
 Resource: {
@@ -33,6 +42,7 @@ InputBinding: {
 OutputBinding: {
   artifact: string
   from: string
+  format?: "jsonl" | "json" | "csv" | "markdown" | "urls"
 }
 
 Entry: {
@@ -56,8 +66,11 @@ Schedule: {
 }
 
 Hooks: {
-  before?: [...Hook]
-  after?: [...Hook]
+  post_discover?: [...Hook]
+  pre_extract?:   [...Hook]
+  post_extract?:  [...Hook]
+  pre_assemble?:  [...Hook]
+  post_assemble?: [...Hook]
 }
 
 Hook: {
@@ -78,7 +91,10 @@ Selector: {
   pagination?: Pagination
   matrix?: Matrix
   delay_ms?: int & >=0
-  hooks?: { post_extract?: [...Hook] }
+  hooks?: {
+    pre_extract?:  [...Hook]
+    post_extract?: [...Hook]
+  }
 }
 
 Context: {

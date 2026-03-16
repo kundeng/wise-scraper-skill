@@ -124,7 +124,11 @@ agent-browser close
 
 ## Hook System
 
-Hooks allow site-specific customization at 5 points:
+Hooks allow site-specific customization. They run at two levels:
+
+### Global hooks (per-resource)
+
+Declared at the resource or deployment level. Fire for every page/record in the resource.
 
 | Hook Point | When | Use For |
 |---|---|---|
@@ -133,6 +137,26 @@ Hooks allow site-specific customization at 5 points:
 | `post_extract` | After raw data captured | AI enrichment, content classification, quality checks |
 | `pre_assemble` | Before final assembly | Cross-page link resolution, TOC generation |
 | `post_assemble` | After output is built | Format conversion, publishing, validation |
+
+### Per-selector hooks
+
+Declared on a specific selector. Fire only when that selector produces output.
+
+```yaml
+selectors:
+  - name: rows
+    multiple: true
+    extract: [...]
+    hooks:
+      pre_extract:
+        - name: auth.inject_token
+      post_extract:
+        - name: ai_adapter.normalize_review
+          config:
+            schema: { reviewer: string, pros: string[], cons: string[] }
+```
+
+Use per-selector hooks when: only one selector needs enrichment/transformation, and you don't want the hook to fire for every page.
 
 ### Register via module
 
@@ -147,31 +171,176 @@ export function registerHooks(registry: HookRegistry) {
 }
 ```
 
-### Register via profile config
+## Named Artifacts
+
+Artifacts are the **named intermediate outputs** of a scraping pipeline. They form a hierarchy so you can build multi-step workflows where each step produces a named, typed, reusable result.
+
+### Why artifacts?
+
+Without named artifacts, multi-step pipelines are implicit — the custom runner code decides what to save, where, and in what format. With named artifacts, the profile declares the pipeline structure and the runner can orchestrate it automatically.
+
+### Schema
 
 ```yaml
-hooks:
-  post_extract:
-    - name: my_module.enrich_record
-      config:
-        model: gpt-4
+artifacts:
+  - name: discovered_urls    # unique name
+    type: urls               # urls | jsonl | json | csv | markdown | html | custom
+    description: "TOC links from left nav"
+  - name: raw_pages
+    type: jsonl
+    parent: discovered_urls  # forms hierarchy: raw_pages depends on discovered_urls
+  - name: assembled_doc
+    type: markdown
+    parent: raw_pages
 ```
+
+### Example: Revspin (flat — one artifact)
+
+```
+revspin_durable.yaml
+  └── resource: revspin_rubber_durable
+        └── artifact: rubber_data (jsonl)
+              produced by: rows selector (multiple: true, 200 records)
+```
+
+```yaml
+# Simple: one resource, one output artifact
+artifacts:
+  - name: rubber_data
+    type: jsonl
+
+resources:
+  - name: revspin_rubber_durable
+    outputs:
+      - artifact: rubber_data
+        from: rows
+```
+
+### Example: Splunk ITSI (hierarchical — three artifacts)
+
+The splunk-itsi scraper has a natural three-step pipeline. Without named artifacts, this required a custom `run.mjs`. With artifacts, the profile can declare it:
+
+```
+splunk-itsi-admin.yaml
+  └── artifact: discovered_urls (urls)
+        └── artifact: raw_pages (jsonl)
+              └── artifact: assembled_doc (markdown)
+```
+
+```yaml
+artifacts:
+  - name: discovered_urls
+    type: urls
+    description: "All TOC links from the left nav"
+  - name: raw_pages
+    type: jsonl
+    parent: discovered_urls
+    description: "Title + body HTML per page"
+  - name: assembled_doc
+    type: markdown
+    parent: raw_pages
+    description: "Single assembled markdown document"
+
+resources:
+  - name: discover
+    entry:
+      url: "https://help.splunk.com/.../about-administering-it-service-intelligence"
+      root: toc
+    selectors:
+      - name: toc
+        parents: []
+        context:
+          selector_exists: "a[href*='/administer/4.21/']"
+        selector: "a[href*='/administer/4.21/']"
+        multiple: true
+        extract:
+          - type: link
+            name: url
+            selector: "a[href*='/administer/4.21/']"
+    outputs:
+      - artifact: discovered_urls
+        from: toc
+        format: urls
+
+  - name: extract_pages
+    entry:
+      url: { artifact: discovered_urls }   # consumes the URL list
+      root: page
+    inputs:
+      - name: urls
+        artifact: discovered_urls
+    selectors:
+      - name: page
+        parents: []
+        context:
+          selector_exists: "article[role='article']"
+        extract:
+          - type: text
+            name: title
+            selector: "h1.title"
+          - type: html
+            name: body
+            selector: ".body"
+    outputs:
+      - artifact: raw_pages
+        from: page
+        format: jsonl
+
+  - name: assemble
+    inputs:
+      - name: pages
+        artifact: raw_pages
+    outputs:
+      - artifact: assembled_doc
+        format: markdown
+    hooks:
+      pre_assemble:
+        - name: processing.html_to_markdown
+        - name: processing.build_toc
+```
+
+### How artifacts chain
+
+```
+discover  →  discovered_urls (urls)
+                    ↓
+extract_pages  →  raw_pages (jsonl)    ← entry.url reads from discovered_urls
+                    ↓
+assemble  →  assembled_doc (markdown)  ← reads from raw_pages, hooks transform
+```
+
+Each resource declares what it **consumes** (`inputs`) and what it **produces** (`outputs`). The runner resolves the DAG and executes resources in dependency order.
 
 ## Config Composition
 
 The runner supports Hydra-like config composition via `convict` + `deepmerge`.
 
 Resolution order (later wins):
+0. Canonical config (`wise.config.yaml` or `.wiserc.yaml` — auto-loaded if present in cwd)
 1. Schema defaults (convict)
 2. Base profile YAML
 3. Override YAML files (`--config extra.yaml`)
 4. Environment variables (`WISE_*`)
 5. CLI `--set key=value`
 
+### Canonical config auto-load
+
+If a `wise.config.yaml` or `.wiserc.yaml` exists in the working directory, the runner loads it automatically as the base config. This is useful for project-level defaults (output dir, timeout, verbosity) shared across multiple profiles.
+
+```yaml
+# wise.config.yaml — project-level defaults
+outputDir: ./output
+verbose: true
+timeout: 30000
+retries: 3
+```
+
 ### Example
 
 ```bash
-# Base profile declares inputs.queries: []
+# Auto-loads wise.config.yaml if present, then merges profile on top:
+node dist/run.js profile.yaml
+
 # Override at runtime:
 node dist/run.js profile.yaml --set inputs.queries=[yasaka,donic,joola]
 
