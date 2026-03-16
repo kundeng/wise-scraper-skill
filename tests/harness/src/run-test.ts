@@ -1,16 +1,18 @@
 #!/usr/bin/env node
 /**
- * WISE Scraper Skill — Session-based Test Runner
+ * WISE Scraper Skill — Test Runner
  *
- * Runs skill test scenarios against coding agent CLIs using their
- * session start/resume features. The harness evaluates artifacts
- * (profile.yaml, JSONL, evidence) the agent produced — not SDK objects.
+ * Runs skill test scenarios against coding agent CLIs (codex, claude,
+ * opencode). Each CLI call is blocking — spawnSync waits for the agent
+ * to exit, then the harness checks the working directory for artifacts.
+ * If artifacts are incomplete, the harness resumes the session with a
+ * follow-up prompt (replay + new message) and waits again.
  *
  * Flow per scenario:
- *   1. start(prompt) → session handle
- *   2. poll working dir for expected artifacts
- *   3. if artifacts incomplete → resume(follow-up) → poll again
- *   4. evaluate: profile checks, JSONL validation, evidence checks
+ *   1. start(prompt) → blocks until agent exits
+ *   2. check working dir for expected artifacts
+ *   3. if incomplete → resume(follow-up) → blocks until exit → check again
+ *   4. evaluate: profile checks, JSONL validation, evidence in output
  *
  * Usage:
  *   node dist/run-test.js --agent codex          # test with Codex only
@@ -108,7 +110,7 @@ RULES:
 }
 
 // ------------------------------------------------------------------
-// Artifact polling — check what the agent has produced so far
+// Artifact check — inspect working dir after agent exits
 // ------------------------------------------------------------------
 
 interface ArtifactCheck {
@@ -119,7 +121,7 @@ interface ArtifactCheck {
   jsonlRecordCount: number;
 }
 
-function pollArtifacts(scenarioDir: string, scenario: Scenario): ArtifactCheck {
+function checkArtifacts(scenarioDir: string, scenario: Scenario): ArtifactCheck {
   const result: ArtifactCheck = {
     hasProfile: false,
     hasJsonl: false,
@@ -180,7 +182,7 @@ function buildFollowUp(check: ArtifactCheck, scenario: Scenario, turn: number): 
 }
 
 // ------------------------------------------------------------------
-// Session-based scenario runner
+// Scenario runner — blocking start → check → resume → check loop
 // ------------------------------------------------------------------
 
 function runScenario(
@@ -218,12 +220,12 @@ function runScenario(
   turnOutputs.push(lastOutput);
   console.log(`  [${agent.name}] Session: ${handle.sessionId} (exit=${startResult.exitCode})`);
 
-  // --- Turns 2..N: Poll artifacts, resume if needed ---
+  // --- Turns 2..N: check artifacts after exit, resume if needed ---
   let turnCount = 1;
   for (let i = 0; i < maxResumes; i++) {
-    const check = pollArtifacts(scenarioDir, scenario);
+    const check = checkArtifacts(scenarioDir, scenario);
     const files = listWorkFiles(scenarioDir);
-    console.log(`  [${agent.name}] Poll: profile=${check.hasProfile} jsonl=${check.hasJsonl} files=[${files.join(", ")}]`);
+    console.log(`  [${agent.name}] Check: profile=${check.hasProfile} jsonl=${check.hasJsonl} files=[${files.join(", ")}]`);
 
     const followUp = buildFollowUp(check, scenario, turnCount);
     if (!followUp) {

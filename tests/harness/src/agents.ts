@@ -1,16 +1,23 @@
 /**
- * Session-based CLI agent interface for the WISE test harness.
+ * CLI agent interface for the WISE test harness.
  *
  * Same pattern as the AI adapter: vendor-neutral interface, CLI backend,
- * evaluate artifacts. No SDK dependencies — shell out to agent CLIs
- * (codex, claude, opencode) using their session start/resume features.
+ * evaluate artifacts. No SDK dependencies.
  *
- * Flow:  start(prompt) → sessionId → poll artifacts → resume(follow-up) → evaluate
+ * Each agent CLI is a **blocking call** — spawnSync runs the binary,
+ * waits for it to exit, captures stdout/stderr. After it exits the
+ * harness inspects the working directory for artifacts and decides
+ * whether to resume with a follow-up prompt.
  *
- * Each CLI has its own flags:
- *   codex:    codex "prompt"                      → codex resume <session-id>
- *   claude:   claude --session-id <uuid> -p "msg" → claude --resume <id> -p "msg"
- *   opencode: opencode run "prompt"               → opencode run --session <id> "msg"
+ * Lifecycle:
+ *   start(prompt) → blocks until exit → check artifacts
+ *     → if incomplete: resume(follow-up) → blocks until exit → check again
+ *     → evaluate final artifacts
+ *
+ * Resume replays the earlier conversation + appends the new prompt:
+ *   codex:    codex --full-auto "prompt"           → codex resume <session-id>
+ *   claude:   claude --session-id <id> -p "prompt" → claude --resume <id> -p "msg"
+ *   opencode: opencode run "prompt"                → opencode run --session <id> "msg"
  */
 
 import { randomUUID } from "crypto";
