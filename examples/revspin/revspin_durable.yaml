@@ -1,0 +1,91 @@
+name: revspin-durable-top2pages
+resources:
+  - name: revspin_rubber_durable
+    entry:
+      url: https://revspin.net/top-rubber/overall-desc.html
+      root: root
+    globals:
+      timeout_ms: 20000
+      retries: 2
+      user_agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36
+    selectors:
+      - name: root
+        parents: []
+        context:
+          url_pattern: revspin.net/top-rubber/overall-desc.html
+          selector_exists: table
+        interaction:
+          - type: click
+            target:
+              css: td.durability a
+            click_action_type: real
+          - type: wait
+            network_idle: true
+      - name: durability_pages
+        type: pagination
+        parents: [root]
+        context:
+          url_pattern: revspin.net/top-rubber/durability-desc.html
+          selector_exists: "a.btn.btn-default[href*='p=']"
+        selector: "a.btn.btn-default[href*='p=']"
+        pagination:
+          pagination_type: numeric
+          selector: "a.btn.btn-default[href*='p=']"
+          start_page: 1
+          page_limit: 2
+      - name: rows
+        type: element
+        parents: [durability_pages]
+        context:
+          selector_exists: "table tbody tr"
+        selector: "table tbody tr:not(.head)"
+        multiple: true
+        extract:
+          - type: text
+            name: rank
+            selector: td.rank
+          - type: text
+            name: rubber
+            selector: td.product
+          - type: text
+            name: speed
+            selector: td.speed
+          - type: text
+            name: spin
+            selector: td.spin
+          - type: text
+            name: control
+            selector: td.control
+          - type: text
+            name: tacky
+            selector: td.tackiness
+          - type: text
+            name: weight
+            selector: td.weight
+          - type: text
+            name: sponge_hardness
+            selector: td.sponge_hardness
+          - type: text
+            name: gears
+            selector: td.gears
+          - type: text
+            name: throw_angle
+            selector: td.throw_angle
+          - type: text
+            name: consistency
+            selector: td.consistency
+          - type: text
+            name: durable
+            selector: td.durability
+          - type: text
+            name: overall
+            selector: td.overall
+          - type: text
+            name: ratings
+            selector: td.ratings
+          - type: text
+            name: price
+            selector: td.price
+    outputs:
+      - artifact: revspin_durable_top2pages
+        from: rows

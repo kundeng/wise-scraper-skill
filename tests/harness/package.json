@@ -1,0 +1,26 @@
+{
+  "name": "wise-scraper-skill-tests",
+  "version": "1.0.0",
+  "description": "Test harness for running the WISE scraper skill against coding agents (Codex, Claude Code, OpenCode)",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test:codex": "node dist/run-test.js --agent codex",
+    "test:claude": "node dist/run-test.js --agent claude",
+    "test:opencode": "node dist/run-test.js --agent opencode",
+    "test:all": "node dist/run-test.js --agent all"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/claude-code": "*",
+    "@openai/codex-sdk": "*",
+    "@opencode-ai/sdk": "*"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

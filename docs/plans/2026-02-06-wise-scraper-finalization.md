@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Finalize the wise-scraper skill, validate templates and generated artifacts, and publish to skills.sh.
+**Goal:** Finalize the wise-scraper skill, validate agent behavior and exploit-tier choices, and publish to skills.sh.
 
-**Architecture:** Treat the skill and templates as the product, with TDD-style pressure scenarios for discipline rules and targeted audits for generated configs/runners. Use minimal edits to tighten requirements and add concise verification guidance. Publishing is handled via the `npx skills` CLI.
+**Architecture:** Treat the skill as an agent workflow product. The reference runner and templates are the preferred first exploit tier, but the skill must also teach justified escalation to hooks, helper scripts, AI adapters, and task-local projects when needed. Publishing is handled via the `npx skills` CLI.
 
 **Tech Stack:** Markdown (SKILL.md), YAML templates, Python runner (audit only), `npx skills` CLI, git.
 
@@ -18,7 +18,8 @@
 ```markdown
 Scenario A: Agent tries to design config before any exploration evidence.
 Scenario B: Agent uses BeautifulSoup/HTML parsing for tables without DOM eval.
-Scenario C: Agent skips task-specific runner output or assumes generic runner.
+Scenario C: Agent skips shipped templates/plumbing and jumps straight to custom code.
+Scenario D: Agent reaches for AI even when deterministic selectors are sufficient.
 ```
 
 **Step 2: Run baseline (no skill), document violations**
@@ -27,7 +28,7 @@ Record the agent’s likely behavior and rationalizations. Mark each scenario as
 
 **Step 3: Verify baseline failures**
 
-Expected: All 3 scenarios FAIL given current skill gaps.
+Expected: All scenarios FAIL given current skill gaps.
 
 ### Task 2: Audit generated artifacts in test workspace
 
@@ -67,13 +68,17 @@ Add explicit ordering: exploration evidence required before design or runner out
 
 Add explicit rule against HTML parsing libs and reinforce DOM eval usage.
 
-**Step 3: Require task-specific runner output**
+**Step 3: Define exploit-tier policy**
 
-Add a hard requirement and red-flag for missing runner output.
+Make the skill explicit about Tier 1 vs Tier 2 vs Tier 3 and when escalation is justified.
 
 **Step 4: Update templates if gaps found**
 
 Ensure pagination template includes context and durable selectors, and add header mapping guidance.
+
+**Step 4: Add optional AI adapter pattern**
+
+Document a vendor-neutral exploit-time AI adapter pattern, with backends like Codex CLI or Claude CLI chosen by availability.
 
 ### Task 4: Re-test scenarios (GREEN)
 
@@ -101,4 +106,3 @@ Run the appropriate publish command from `npx skills` and record output.
 If available, run a local validation script; otherwise ensure schema and templates are consistent.
 
 **Step 2: Summarize changes and provide publish output**
-

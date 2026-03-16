@@ -1,0 +1,42 @@
+name: splunk-itsi-administer
+description: "Splunk ITSI 4.21 Administer manual — all pages into single markdown"
+
+entry:
+  url: "https://help.splunk.com/en/splunk-it-service-intelligence/splunk-it-service-intelligence/administer/4.21/overview/about-administering-it-service-intelligence"
+  wait: networkidle
+
+discovery:
+  scope: "a[href*='/administer/4.21/']"
+  url_pattern: "https://help.splunk.com/en/splunk-it-service-intelligence/splunk-it-service-intelligence/administer/4.21/**"
+  locale: "/en/"
+  exclude_patterns:
+    - "#*"
+  dedupe: true
+
+content:
+  container: "article[role='article']"
+  remove:
+    - "nav"
+    - ".cookie-banner"
+    - "script"
+    - "style"
+    - "noscript"
+  fields:
+    title:
+      selector: "h1.title"
+      type: text
+    body:
+      selector: ".body"
+      type: html
+    url:
+      type: url
+
+output:
+  format: markdown
+  intermediate: jsonl
+  file: "splunk-itsi-administer-4.21.md"
+
+options:
+  delay_ms: 1500
+  timeout_ms: 30000
+  max_pages: 200
