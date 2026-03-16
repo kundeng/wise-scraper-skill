@@ -7,47 +7,64 @@ description: "Structured web scraping for AI coders: explore, then exploit with 
 
 WISE teaches an AI coding agent **structured, repeatable web scraping** for JS-rendered sites. The goal is a **working scraping project** built from shipped WISE assets.
 
+> **Rule 0 — Orient before acting.** Before opening a browser or writing any code, read `references/field-guide.md` and scan `templates/*.yaml` to understand the profile schema and available fragments. Only then start exploration.
+
 ```
-Explore → Evidence → Choose tier → Exploit → JSONL intermediate → Assemble
+Orient → Explore → Evidence → Choose tier → Exploit → JSONL → Assemble
 ```
 
-1. **Explore** — inspect the live site with `agent-browser`, test selectors, map navigation
-2. **Evidence** — record selector proof and DOM observations before designing the exploit
-3. **Choose tier** — prefer shipped plumbing, escalate only when justified
-4. **Exploit** — assemble a profile from template fragments, run it, extend with hooks or task-local code
-5. **Process** — JSONL is the intermediate truth; assemble markdown/CSV/JSON later
+1. **Orient** — read the schema, templates, and runner options; understand what's shipped
+2. **Explore** — inspect the live site with `agent-browser`, test selectors, map navigation
+3. **Evidence** — record selector proof and DOM observations before designing the exploit
+4. **Choose tier** — prefer shipped plumbing, escalate only when justified; ask about runtime preference if unclear
+5. **Exploit** — assemble a profile from template fragments, run it, extend with hooks or task-local code
+6. **Process** — JSONL is the intermediate truth; assemble markdown/CSV/JSON later
 
 Use when: JS-rendered sites, pagination, UI state, filter combos, structured repeatable output.
-Do not use when: a stable API/export exists, or static `curl` is clearly enough.
+Not when: a stable API/export exists, or static `curl` is clearly enough.
 
 ## Agent Contract
 
-1. **Explore first.** Use `agent-browser` to inspect DOM, interactions, and state before writing any profile.
-2. **Show evidence.** Record selectors, DOM snippets, or snapshots before writing project code.
-3. **Assemble from fragments.** Templates in `templates/*.yaml` are composable fragments — pick the pieces that match (pagination, matrix, table, interaction, etc.) and combine them into one profile. They are not a menu of alternatives.
-4. **Start from shipped assets.** Use the runner and reference modules before inventing new structure.
-5. **Copy and adapt deliberately.** Copy, tweak, and extend shipped code to fit the target.
-6. **DOM eval for live extraction.** HTML parsing libraries are for post-processing captured HTML only.
+1. **Orient first.** Read the field guide and scan templates before touching `agent-browser` or writing code.
+2. **Explore before exploiting.** Use `agent-browser` to inspect DOM, interactions, and state.
+3. **Show evidence.** Record selectors, DOM snippets, or snapshots before writing profiles.
+4. **Assemble from fragments.** Templates in `templates/*.yaml` are composable — combine them. They are not alternatives.
+5. **Infer runtime preference.** If the user mentions Crawlee, Scrapy, or a Python pipeline, use Tier 4. If unclear, ask.
+6. **DOM eval for live extraction.** HTML parsing libraries are for post-processing only.
 
 ### Exploit Tiers
 
 | Tier | When | What |
 |---|---|---|
-| 1 | Target fits declarative flow | Assemble template fragments + shipped runner |
-| 2 | Target needs adaptation | Copy/adapt runner modules, hooks, helpers, or AI adapter into task project |
+| 1 | Target fits declarative flow | Assemble template fragments + shipped `agent-browser` runner |
+| 2 | Target needs adaptation | Copy/adapt runner modules, hooks, helpers, or AI adapter |
 | 3 | Target exceeds reference boundary | Bespoke project, carrying WISE discipline |
+| 4 | User prefers alternative runtime | Same YAML profile, executed via Crawlee or Scrapy+Playwright runner |
 
-When escalating, explain why the simpler tier is insufficient.
+When escalating, explain why the simpler tier is insufficient. For Tier 4, the user's runtime preference (or project context like existing `package.json`/`requirements.txt`) determines the choice.
 
 ### Runner Boundary
 
-The runner handles: YAML profile interpretation, `agent-browser` driving, DOM-eval extraction, selectors, interactions, pagination, matrix, post-processing.
+The **shipped runner** (`references/runner/`) uses `agent-browser` for browser driving. It handles: YAML profile interpretation, DOM-eval extraction, selectors, interactions, pagination, matrix, post-processing.
 
-The agent may extend beyond the runner: hooks, helper scripts, chaining glue, site-specific assembly, AI-assisted extraction. If a capability isn't native in the runner, the agent adds it to the project — the skill teaches how.
+**Alternative runners** interpret the same YAML profile with a different backend. See `references/guide.md § Alternative Runner Backends` for Crawlee and Scrapy+Playwright runners.
 
-### AI Adapter (optional)
+The agent may extend beyond any runner: hooks, helper scripts, chaining, AI-assisted extraction.
 
-Introduce AI only when DOM extraction + hooks + post-processing are insufficient. Use a vendor-neutral CLI adapter (`codex`, `claude`, or another local binary). See `references/ai-adapter.md` for the full pattern.
+## Read Next — by step
+
+Do **not** read all references upfront. Read only what the current step needs:
+
+| Step | Read |
+|---|---|
+| Orient | `references/field-guide.md`, scan `templates/*.yaml` |
+| Explore | `agent-browser` CLI help (`agent-browser --help`) |
+| Choose tier / runtime | `references/guide.md § Exploit Tiers`, `§ Alternative Runner Backends` |
+| Write profile | `references/schema.cue`, `references/field-guide.md` |
+| Add hooks | `references/guide.md § Hook System` |
+| Add AI adapter | `references/ai-adapter.md` |
+| Config / CLI | `references/guide.md § Config Composition`, `§ Runner CLI Reference` |
+| Worked examples | `examples/overview.md` |
 
 ## Working Rules
 
@@ -57,22 +74,11 @@ Introduce AI only when DOM extraction + hooks + post-processing are insufficient
 - **Avoid ambiguous clicks** — scope by CSS/role/context
 - **JSONL is intermediate truth** — assemble final formats later
 
-## Quick Reference
-
-| Path | Purpose |
-|---|---|
-| `references/schema.cue` | Profile schema |
-| `references/field-guide.md` | Plain-English field guide |
-| `references/guide.md` | Full usage guide, config, hooks, CLI |
-| `references/ai-adapter.md` | Optional AI adapter pattern |
-| `references/runner/src/` | Reference runner source |
-| `templates/*.yaml` | Composable profile fragments |
-| `examples/overview.md` | Shipped examples |
-
 ## Common Failure Modes
 
+- Jumping to `agent-browser` or code before reading the framework
 - Designing the exploit before collecting exploration evidence
 - Jumping to bespoke code when template fragments would work
-- Treating the runner as mandatory for everything or useless too early
 - Using HTML parsing on the live page instead of DOM eval
 - Reaching for AI when selectors and plumbing are sufficient
+- Ignoring user runtime preference (Crawlee/Scrapy) and defaulting to shipped runner

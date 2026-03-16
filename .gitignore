@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.tmp
 .tmp_eval.js
+AGENTS.md
 .kiro/
 docs/
 tests/

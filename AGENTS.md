@@ -9,14 +9,15 @@ Run `/spec-help` for the full command list.
 
 ## Required Skills
 
-| Skill | Purpose |
-|-------|---------|
+
+| Skill             | Purpose                                                           |
+| ----------------- | ----------------------------------------------------------------- |
 | `spec-driven-dev` | Spec lifecycle: requirements → design → tasks → implement loop |
-| `agent-browser` | Browser automation backend used by the runner and for exploration |
+| `agent-browser`   | Browser automation backend used by the runner and for exploration |
 
 ## Project Context
 
-This is a **Windsurf Cascade skill** — **WISE** (Web Info Structured Extraction). It teaches AI coding agents structured, repeatable web scraping, data mining, and content extraction from JS-rendered sites. While it uses the Windsurf skill format (`SKILL.md`), it is a **universal agent skill** installable via `npx skills add` to Codex, Claude Code, OpenCode, Windsurf, Cursor, Cline, Amp, and other compatible agents.
+This is a **WISE** (Web Info Structured Extraction) skill. It teaches AI coding agents structured, repeatable web scraping, data mining, and content extraction from JS-rendered sites. It uses a **universal agent skill** installable via `npx skills add` to Codex, Claude Code, OpenCode, Windsurf, Cursor, Cline, Amp, and other compatible agents.
 
 The intended deliverable is a **working scraping project**. That project should usually start from the shipped WISE templates, runner, and reference modules, then copy/adapt/tweak those assets as needed for the target site.
 
