@@ -1,28 +1,37 @@
 #!/usr/bin/env node
 /**
- * WISE Scraper Skill — Test Runner
+ * WISE Scraper Skill — Session-based Test Runner
  *
- * Runs skill test scenarios against available coding agents and produces
- * a structured report showing which scenarios pass/fail per agent.
+ * Runs skill test scenarios against coding agent CLIs using their
+ * session start/resume features. The harness evaluates artifacts
+ * (profile.yaml, JSONL, evidence) the agent produced — not SDK objects.
+ *
+ * Flow per scenario:
+ *   1. start(prompt) → session handle
+ *   2. poll working dir for expected artifacts
+ *   3. if artifacts incomplete → resume(follow-up) → poll again
+ *   4. evaluate: profile checks, JSONL validation, evidence checks
  *
  * Usage:
  *   node dist/run-test.js --agent codex          # test with Codex only
  *   node dist/run-test.js --agent claude          # test with Claude Code only
  *   node dist/run-test.js --agent opencode        # test with OpenCode only
  *   node dist/run-test.js --agent all             # test with all available
- *   node dist/run-test.js --scenario single-page-article  # run specific scenario
- *   node dist/run-test.js --list                  # list available scenarios
- *   node dist/run-test.js --check                 # check which agents are available
+ *   node dist/run-test.js --scenario single-page-article  # run one scenario
+ *   node dist/run-test.js --list                  # list scenarios
+ *   node dist/run-test.js --check                 # check CLI availability
  */
 
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from "fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync } from "fs";
 import { resolve, join } from "path";
 import {
   getAgents,
   getAvailableAgents,
+  listWorkFiles,
   type Agent,
   type AgentResult,
   type AgentOptions,
+  type SessionHandle,
 } from "./agents.js";
 import { scenarios, getScenario, type Scenario } from "./scenarios.js";
 
@@ -37,6 +46,7 @@ interface TestArgs {
   check: boolean;
   outputDir: string;
   skillDir: string;
+  maxResumes: number;
   verbose: boolean;
 }
 
@@ -48,6 +58,7 @@ function parseArgs(argv: string[]): TestArgs {
     check: false,
     outputDir: "./test-results",
     skillDir: resolve(process.cwd()),
+    maxResumes: 2,
     verbose: false,
   };
 
@@ -58,6 +69,7 @@ function parseArgs(argv: string[]): TestArgs {
     else if (argv[i] === "--check") args.check = true;
     else if (argv[i] === "--output-dir") args.outputDir = argv[++i];
     else if (argv[i] === "--skill-dir") args.skillDir = resolve(argv[++i]);
+    else if (argv[i] === "--max-resumes") args.maxResumes = parseInt(argv[++i], 10);
     else if (argv[i] === "-v" || argv[i] === "--verbose") args.verbose = true;
   }
 
@@ -88,7 +100,7 @@ RULES:
 - Use agent-browser for exploration. Show DOM evidence before writing profiles.
 - Write YAML profiles using the WISE schema (see references/schema.cue).
 - Run profiles using: node ${skillDir}/references/runner/dist/run.js <profile.yaml> --output-dir ./output
-- Do NOT write custom scraping scripts. Use the shipped runner.
+- Prefer shipped templates and runner. Only escalate to bespoke code if justified.
 - Extract with DOM eval, not HTML parsing libraries.
 - Use header-based table column mapping.
 - The runner supports: selectors, interactions, pagination, matrix, extract, hooks.
@@ -96,7 +108,79 @@ RULES:
 }
 
 // ------------------------------------------------------------------
-// Scenario runner
+// Artifact polling — check what the agent has produced so far
+// ------------------------------------------------------------------
+
+interface ArtifactCheck {
+  hasProfile: boolean;
+  hasJsonl: boolean;
+  missingArtifacts: string[];
+  profileMissing: string[];
+  jsonlRecordCount: number;
+}
+
+function pollArtifacts(scenarioDir: string, scenario: Scenario): ArtifactCheck {
+  const result: ArtifactCheck = {
+    hasProfile: false,
+    hasJsonl: false,
+    missingArtifacts: [],
+    profileMissing: [],
+    jsonlRecordCount: 0,
+  };
+
+  // Check expected artifacts
+  for (const artifact of scenario.expectedArtifacts) {
+    if (existsSync(join(scenarioDir, artifact))) {
+      if (artifact.endsWith(".yaml") || artifact.endsWith(".yml")) result.hasProfile = true;
+    } else {
+      result.missingArtifacts.push(artifact);
+    }
+  }
+
+  // Check profile content
+  const profilePath = join(scenarioDir, "profile.yaml");
+  if (existsSync(profilePath)) {
+    result.hasProfile = true;
+    const content = readFileSync(profilePath, "utf-8");
+    result.profileMissing = scenario.profileChecks.filter((check) => !content.includes(check));
+  }
+
+  // Check JSONL output
+  const jsonlFiles = findJsonlFiles(scenarioDir);
+  if (jsonlFiles.length > 0) {
+    result.hasJsonl = true;
+    result.jsonlRecordCount = readJsonl(jsonlFiles[0]).length;
+  }
+
+  return result;
+}
+
+/** Build a follow-up prompt based on what's missing. */
+function buildFollowUp(check: ArtifactCheck, scenario: Scenario, turn: number): string | null {
+  const issues: string[] = [];
+
+  if (!check.hasProfile) {
+    issues.push("You have not created a profile.yaml yet. Please write the YAML profile for this scenario.");
+  } else if (check.profileMissing.length > 0) {
+    issues.push(`Your profile.yaml is missing expected elements: ${check.profileMissing.join(", ")}. Please fix it.`);
+  }
+
+  if (check.hasProfile && !check.hasJsonl) {
+    issues.push("The profile exists but no JSONL output was produced. Please run the profile using the shipped runner and produce output.");
+  }
+
+  if (check.hasJsonl && scenario.validateOutput) {
+    // We have output — let the final evaluation handle validation
+    return null;
+  }
+
+  if (issues.length === 0) return null;
+
+  return `[Turn ${turn + 1} follow-up] The following issues remain:\n${issues.map((i) => `- ${i}`).join("\n")}\n\nPlease continue working on this scenario.`;
+}
+
+// ------------------------------------------------------------------
+// Session-based scenario runner
 // ------------------------------------------------------------------
 
 function runScenario(
@@ -104,8 +188,10 @@ function runScenario(
   scenario: Scenario,
   skillDir: string,
   outputDir: string,
+  maxResumes: number,
   verbose: boolean,
 ): AgentResult {
+  const start = Date.now();
   const scenarioDir = resolve(outputDir, `${agent.name}_${scenario.id}`);
   if (!existsSync(scenarioDir)) mkdirSync(scenarioDir, { recursive: true });
 
@@ -113,57 +199,107 @@ function runScenario(
   console.log(`  [${agent.name}] Working dir: ${scenarioDir}`);
 
   const systemPrompt = buildSystemPrompt(skillDir);
-
-  const result = agent.run(scenario.prompt, {
+  const opts: AgentOptions = {
     cwd: scenarioDir,
     systemPrompt,
     timeout: scenario.timeoutSeconds * 1000,
     verbose,
-  });
+  };
 
-  result.scenario = scenario.id;
+  const turnOutputs: string[] = [];
+  let handle: SessionHandle;
+  let lastOutput: string;
 
-  // Check expected artifacts
-  for (const artifact of scenario.expectedArtifacts) {
-    const artPath = join(scenarioDir, artifact);
-    if (existsSync(artPath)) {
-      result.filesCreated.push(artifact);
+  // --- Turn 1: Start session ---
+  console.log(`  [${agent.name}] Turn 1: starting session...`);
+  const startResult = agent.start(scenario.prompt, opts);
+  handle = startResult.handle;
+  lastOutput = startResult.output;
+  turnOutputs.push(lastOutput);
+  console.log(`  [${agent.name}] Session: ${handle.sessionId} (exit=${startResult.exitCode})`);
+
+  // --- Turns 2..N: Poll artifacts, resume if needed ---
+  let turnCount = 1;
+  for (let i = 0; i < maxResumes; i++) {
+    const check = pollArtifacts(scenarioDir, scenario);
+    const files = listWorkFiles(scenarioDir);
+    console.log(`  [${agent.name}] Poll: profile=${check.hasProfile} jsonl=${check.hasJsonl} files=[${files.join(", ")}]`);
+
+    const followUp = buildFollowUp(check, scenario, turnCount);
+    if (!followUp) {
+      console.log(`  [${agent.name}] Artifacts look complete after ${turnCount} turn(s)`);
+      break;
     }
+
+    turnCount++;
+    console.log(`  [${agent.name}] Turn ${turnCount}: resuming session...`);
+    const resumeResult = agent.resume(handle, followUp, opts);
+    lastOutput = resumeResult.output;
+    turnOutputs.push(lastOutput);
+    console.log(`  [${agent.name}] Resume exit=${resumeResult.exitCode}`);
   }
 
-  // Check profile content
-  if (scenario.profileChecks.length > 0) {
-    const profilePath = join(scenarioDir, "profile.yaml");
-    if (existsSync(profilePath)) {
-      const profileContent = readFileSync(profilePath, "utf-8");
-      const missing = scenario.profileChecks.filter((check) => !profileContent.includes(check));
-      if (missing.length > 0) {
-        result.success = false;
-        result.error = `Profile missing expected content: ${missing.join(", ")}`;
-      }
-    }
+  // --- Final evaluation ---
+  const allOutput = turnOutputs.join("\n---\n");
+  const filesCreated = listWorkFiles(scenarioDir);
+  const errors: string[] = [];
+
+  // Profile checks
+  const profilePath = join(scenarioDir, "profile.yaml");
+  if (existsSync(profilePath)) {
+    const content = readFileSync(profilePath, "utf-8");
+    const missing = scenario.profileChecks.filter((c) => !content.includes(c));
+    if (missing.length > 0) errors.push(`Profile missing: ${missing.join(", ")}`);
+  } else {
+    errors.push("No profile.yaml created");
   }
 
-  // Validate output records if JSONL exists
+  // Evidence checks — look in agent output
+  if (scenario.evidenceChecks) {
+    const missing = scenario.evidenceChecks.filter((c) => !allOutput.toLowerCase().includes(c.toLowerCase()));
+    if (missing.length > 0) errors.push(`Evidence missing in output: ${missing.join(", ")}`);
+  }
+
+  // Decision checks — look in agent output
+  if (scenario.decisionChecks) {
+    const missing = scenario.decisionChecks.filter((c) => !allOutput.toLowerCase().includes(c.toLowerCase()));
+    if (missing.length > 0) errors.push(`Decision missing in output: ${missing.join(", ")}`);
+  }
+
+  // JSONL validation
   if (scenario.validateOutput) {
     const jsonlFiles = findJsonlFiles(scenarioDir);
     if (jsonlFiles.length > 0) {
       const records = readJsonl(jsonlFiles[0]);
       const validation = scenario.validateOutput(records);
-      if (!validation.pass) {
-        result.success = false;
-        result.error = (result.error ? result.error + "; " : "") + validation.reason;
-      }
+      if (!validation.pass) errors.push(validation.reason);
+    } else {
+      errors.push("No JSONL output produced");
     }
   }
+
+  const success = errors.length === 0;
+  const result: AgentResult = {
+    agent: agent.name,
+    scenario: scenario.id,
+    sessionId: handle.sessionId,
+    success,
+    output: allOutput,
+    turnOutputs,
+    filesCreated,
+    filesModified: [],
+    duration_ms: Date.now() - start,
+    turns: turnCount,
+    error: errors.length > 0 ? errors.join("; ") : undefined,
+  };
 
   // Write result
   const resultPath = join(scenarioDir, "_result.json");
   writeFileSync(resultPath, JSON.stringify(result, null, 2), "utf-8");
 
-  const status = result.success ? "✓ PASS" : "✗ FAIL";
-  console.log(`  [${agent.name}] ${status} — ${scenario.name} (${result.duration_ms}ms)`);
-  if (result.error) console.log(`  [${agent.name}]   Error: ${result.error}`);
+  const status = success ? "✓ PASS" : "✗ FAIL";
+  console.log(`  [${agent.name}] ${status} — ${scenario.name} (${result.duration_ms}ms, ${turnCount} turn(s))`);
+  if (result.error) console.log(`  [${agent.name}]   ${result.error}`);
 
   return result;
 }
@@ -195,40 +331,35 @@ function generateReport(results: AgentResult[], agents: string[], scenarioIds: s
     agents,
     scenarios: scenarioIds,
     results,
-    summary: {
-      total: results.length,
-      passed,
-      failed,
-      skipped,
-    },
+    summary: { total: results.length, passed, failed, skipped },
   };
 }
 
 function printReport(report: TestReport): void {
-  console.log("\n" + "=".repeat(60));
+  console.log("\n" + "=".repeat(70));
   console.log("WISE Scraper Skill — Test Report");
-  console.log("=".repeat(60));
+  console.log("=".repeat(70));
   console.log(`Timestamp: ${report.timestamp}`);
-  console.log(`Agents: ${report.agents.join(", ")}`);
+  console.log(`Agents:    ${report.agents.join(", ")}`);
   console.log(`Scenarios: ${report.scenarios.length}`);
   console.log();
 
   // Matrix view
   console.log("Results Matrix:");
-  const header = ["Scenario", ...report.agents].map((s) => s.padEnd(20)).join(" | ");
+  const header = ["Scenario", ...report.agents].map((s) => s.padEnd(22)).join(" | ");
   console.log(header);
   console.log("-".repeat(header.length));
 
   for (const sid of report.scenarios) {
-    const row = [sid.padEnd(20)];
-    for (const agent of report.agents) {
-      const r = report.results.find((r) => r.agent === agent && r.scenario === sid);
+    const row = [sid.padEnd(22)];
+    for (const agentName of report.agents) {
+      const r = report.results.find((r) => r.agent === agentName && r.scenario === sid);
       if (!r) {
-        row.push("—".padEnd(20));
+        row.push("—".padEnd(22));
       } else if (r.success) {
-        row.push(`✓ ${r.duration_ms}ms`.padEnd(20));
+        row.push(`✓ ${r.turns}t ${r.duration_ms}ms`.padEnd(22));
       } else {
-        row.push(`✗ ${(r.error ?? "").slice(0, 15)}`.padEnd(20));
+        row.push(`✗ ${(r.error ?? "").slice(0, 18)}`.padEnd(22));
       }
     }
     console.log(row.join(" | "));
@@ -243,16 +374,15 @@ function printReport(report: TestReport): void {
 // ------------------------------------------------------------------
 
 function findJsonlFiles(dir: string): string[] {
-  const fs = require("fs");
   const files: string[] = [];
   try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const entries = readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isFile() && entry.name.endsWith(".jsonl")) {
         files.push(join(dir, entry.name));
       }
       if (entry.isDirectory() && entry.name === "output") {
-        const subEntries = fs.readdirSync(join(dir, "output"), { withFileTypes: true });
+        const subEntries = readdirSync(join(dir, "output"), { withFileTypes: true });
         for (const sub of subEntries) {
           if (sub.isFile() && sub.name.endsWith(".jsonl")) {
             files.push(join(dir, "output", sub.name));
@@ -266,9 +396,9 @@ function findJsonlFiles(dir: string): string[] {
   return files;
 }
 
-function readJsonl(path: string): unknown[] {
+function readJsonl(filePath: string): unknown[] {
   try {
-    const text = readFileSync(path, "utf-8").trim();
+    const text = readFileSync(filePath, "utf-8").trim();
     if (!text) return [];
     return text.split("\n").map((line) => JSON.parse(line));
   } catch {
@@ -280,23 +410,22 @@ function readJsonl(path: string): unknown[] {
 // Main
 // ------------------------------------------------------------------
 
-async function main(): Promise<void> {
+function main(): void {
   const args = parseArgs(process.argv.slice(2));
 
   // --list: show available scenarios
   if (args.list) {
     console.log("Available test scenarios:\n");
     for (const s of scenarios) {
-      console.log(`  ${s.id.padEnd(25)} [${s.complexity}] ${s.name}`);
+      console.log(`  ${s.id.padEnd(30)} [${s.complexity}] ${s.name}`);
     }
     return;
   }
 
-  // --check: show available agents
+  // --check: show available agent CLIs
   if (args.check) {
     console.log("Checking agent CLI availability...\n");
-    const allAgents = getAgents();
-    for (const agent of allAgents) {
+    for (const agent of getAgents()) {
       const ok = agent.available();
       console.log(`  ${ok ? "✓" : "✗"} ${agent.name}`);
     }
@@ -312,10 +441,9 @@ async function main(): Promise<void> {
       process.exit(1);
     }
   } else {
-    const allAgents = getAgents();
-    agents = allAgents.filter((a) => a.name === args.agent);
+    agents = getAgents().filter((a) => a.name === args.agent);
     if (agents.length === 0) {
-      console.error(`Agent '${args.agent}' not found. Available: ${allAgents.map((a) => a.name).join(", ")}`);
+      console.error(`Agent '${args.agent}' not found. Available: ${getAgents().map((a) => a.name).join(", ")}`);
       process.exit(1);
     }
   }
@@ -327,7 +455,7 @@ async function main(): Promise<void> {
   if (args.scenario) {
     const s = getScenario(args.scenario);
     if (!s) {
-      console.error(`Scenario '${args.scenario}' not found. Use --list to see available scenarios.`);
+      console.error(`Scenario '${args.scenario}' not found. Use --list to see available.`);
       process.exit(1);
     }
     targetScenarios = [s];
@@ -336,6 +464,7 @@ async function main(): Promise<void> {
   }
 
   console.log(`Scenarios: ${targetScenarios.map((s) => s.id).join(", ")}`);
+  console.log(`Max resumes per scenario: ${args.maxResumes}`);
   console.log();
 
   // Output directory
@@ -348,24 +477,26 @@ async function main(): Promise<void> {
   for (const scenario of targetScenarios) {
     console.log(`\n--- Scenario: ${scenario.name} (${scenario.complexity}) ---`);
     for (const agent of agents) {
-      const ok = agent.available();
-      if (!ok) {
+      if (!agent.available()) {
         console.log(`  [${agent.name}] SKIP — not available`);
         results.push({
           agent: agent.name,
           scenario: scenario.id,
+          sessionId: "",
           success: false,
           output: "",
+          turnOutputs: [],
           filesCreated: [],
           filesModified: [],
           duration_ms: 0,
+          turns: 0,
           error: "Agent not available",
         });
         continue;
       }
 
       try {
-        const result = runScenario(agent, scenario, args.skillDir, outDir, args.verbose);
+        const result = runScenario(agent, scenario, args.skillDir, outDir, args.maxResumes, args.verbose);
         results.push(result);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -373,11 +504,14 @@ async function main(): Promise<void> {
         results.push({
           agent: agent.name,
           scenario: scenario.id,
+          sessionId: "",
           success: false,
           output: "",
+          turnOutputs: [],
           filesCreated: [],
           filesModified: [],
           duration_ms: 0,
+          turns: 0,
           error: msg,
         });
       }
@@ -385,9 +519,11 @@ async function main(): Promise<void> {
   }
 
   // Generate and print report
-  const agentNames = agents.map((a) => a.name);
-  const scenarioIds = targetScenarios.map((s) => s.id);
-  const report = generateReport(results, agentNames, scenarioIds);
+  const report = generateReport(
+    results,
+    agents.map((a) => a.name),
+    targetScenarios.map((s) => s.id),
+  );
   printReport(report);
 
   // Write report to file
@@ -395,13 +531,7 @@ async function main(): Promise<void> {
   writeFileSync(reportPath, JSON.stringify(report, null, 2), "utf-8");
   console.log(`\nReport written to: ${reportPath}`);
 
-  // Exit with failure code if any tests failed
-  if (report.summary.failed > 0) {
-    process.exit(1);
-  }
+  if (report.summary.failed > 0) process.exit(1);
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+main();

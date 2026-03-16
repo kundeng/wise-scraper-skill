@@ -1,14 +1,21 @@
 /**
- * CLI-only agent interface for the WISE test harness.
+ * Session-based CLI agent interface for the WISE test harness.
  *
  * Same pattern as the AI adapter: vendor-neutral interface, CLI backend,
- * evaluate artifacts. No SDK dependencies — just shell out to the agent
- * binary (codex, claude, opencode), let it work in a temp directory,
- * then score what it produced.
+ * evaluate artifacts. No SDK dependencies — shell out to agent CLIs
+ * (codex, claude, opencode) using their session start/resume features.
+ *
+ * Flow:  start(prompt) → sessionId → poll artifacts → resume(follow-up) → evaluate
+ *
+ * Each CLI has its own flags:
+ *   codex:    codex "prompt"                      → codex resume <session-id>
+ *   claude:   claude --session-id <uuid> -p "msg" → claude --resume <id> -p "msg"
+ *   opencode: opencode run "prompt"               → opencode run --session <id> "msg"
  */
 
-import { execSync, spawnSync } from "child_process";
-import { writeFileSync, readFileSync, existsSync } from "fs";
+import { randomUUID } from "crypto";
+import { execSync, spawnSync, type SpawnSyncReturns } from "child_process";
+import { writeFileSync, readFileSync, existsSync, readdirSync } from "fs";
 import { join } from "path";
 
 // ------------------------------------------------------------------
@@ -18,11 +25,14 @@ import { join } from "path";
 export interface AgentResult {
   agent: string;
   scenario: string;
+  sessionId: string;
   success: boolean;
   output: string;
+  turnOutputs: string[];
   filesCreated: string[];
   filesModified: string[];
   duration_ms: number;
+  turns: number;
   error?: string;
 }
 
@@ -33,124 +43,198 @@ export interface AgentOptions {
   verbose?: boolean;
 }
 
+export interface SessionHandle {
+  agentName: string;
+  sessionId: string;
+  cwd: string;
+}
+
 export interface Agent {
   name: string;
   available(): boolean;
-  run(prompt: string, opts: AgentOptions): AgentResult;
+  /** Start a new session with an initial prompt. Returns a session handle. */
+  start(prompt: string, opts: AgentOptions): { handle: SessionHandle; output: string; exitCode: number | null };
+  /** Resume an existing session with a follow-up prompt. */
+  resume(handle: SessionHandle, followUp: string, opts: AgentOptions): { output: string; exitCode: number | null };
 }
 
 // ------------------------------------------------------------------
-// CLI Agent — runs any coder CLI as a subprocess
+// Helpers
 // ------------------------------------------------------------------
 
-export class CliAgent implements Agent {
-  name: string;
-  private binary: string;
-  private versionFlag: string;
+function writePromptFile(cwd: string, prompt: string, suffix = ""): string {
+  const file = join(cwd, `_prompt${suffix}.txt`);
+  writeFileSync(file, prompt, "utf-8");
+  return file;
+}
 
-  constructor(name: string, binary: string, versionFlag = "--version") {
-    this.name = name;
-    this.binary = binary;
-    this.versionFlag = versionFlag;
+function execCmd(
+  cmd: string,
+  cwd: string,
+  timeout: number,
+  verbose: boolean,
+  label: string,
+): { output: string; exitCode: number | null } {
+  if (verbose) console.log(`    [${label}] CMD: ${cmd}`);
+
+  const result: SpawnSyncReturns<string> = spawnSync(cmd, {
+    shell: true,
+    cwd,
+    encoding: "utf-8",
+    timeout,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+
+  const output = ((result.stdout ?? "") + (result.stderr ?? "")).trim();
+  return { output, exitCode: result.status };
+}
+
+/** List all files in a directory (non-recursive, ignoring _prompt* and _result*). */
+export function listWorkFiles(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && !e.name.startsWith("_prompt") && !e.name.startsWith("_result"))
+      .map((e) => e.name);
+  } catch {
+    return [];
   }
+}
+
+// ------------------------------------------------------------------
+// Codex Agent
+//   start:  codex "prompt"                     (captures session id from output)
+//   resume: codex resume <session-id>
+// ------------------------------------------------------------------
+
+export class CodexAgent implements Agent {
+  name = "codex";
 
   available(): boolean {
     try {
-      execSync(`${this.binary} ${this.versionFlag}`, {
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-        timeout: 10000,
-        windowsHide: true,
+      execSync("codex --version", {
+        encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+        timeout: 10000, windowsHide: true,
       });
       return true;
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   }
 
-  run(prompt: string, opts: AgentOptions): AgentResult {
-    const start = Date.now();
+  start(prompt: string, opts: AgentOptions) {
+    const sessionId = randomUUID();
+    const promptFile = writePromptFile(opts.cwd, prompt);
+    // codex doesn't support --session-id at launch, so we capture from output.
+    // For now we use the generated UUID as a tracking ID and pass prompt inline.
+    const escaped = readFileSync(promptFile, "utf-8").replace(/"/g, '\\"').replace(/\n/g, " ");
+    const cmd = `codex --full-auto "${escaped}"`;
+    const { output, exitCode } = execCmd(cmd, opts.cwd, opts.timeout ?? 300000, opts.verbose ?? false, this.name);
 
-    // Write prompt to a temp file so we don't hit shell escaping limits
-    const promptFile = join(opts.cwd, "_prompt.txt");
-    writeFileSync(promptFile, prompt, "utf-8");
+    // Try to extract the real session ID from codex output (format varies)
+    const match = output.match(/session[:\s]+([0-9a-f-]{36})/i);
+    const realId = match?.[1] ?? sessionId;
 
-    // Build the command. Each CLI has slightly different invocation:
-    //   codex  <prompt>  --cwd <dir>
-    //   claude <prompt>  --cwd <dir>  --print
-    //   opencode <prompt>
-    // We use a simple approach: pass prompt via file, let the binary read it.
-    const cmd = this.buildCommand(promptFile, opts);
-
-    if (opts.verbose) {
-      console.log(`    [${this.name}] CMD: ${cmd}`);
-    }
-
-    try {
-      const result = spawnSync(cmd, {
-        shell: true,
-        cwd: opts.cwd,
-        encoding: "utf-8",
-        timeout: opts.timeout ?? 300000,
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
-      });
-
-      const output = (result.stdout ?? "") + (result.stderr ?? "");
-
-      return {
-        agent: this.name,
-        scenario: "",
-        success: result.status === 0,
-        output: output.trim(),
-        filesCreated: [],
-        filesModified: [],
-        duration_ms: Date.now() - start,
-        error: result.status !== 0 ? `Exit code ${result.status}` : undefined,
-      };
-    } catch (e: unknown) {
-      return {
-        agent: this.name,
-        scenario: "",
-        success: false,
-        output: "",
-        filesCreated: [],
-        filesModified: [],
-        duration_ms: Date.now() - start,
-        error: e instanceof Error ? e.message : String(e),
-      };
-    }
+    return { handle: { agentName: this.name, sessionId: realId, cwd: opts.cwd }, output, exitCode };
   }
 
-  private buildCommand(promptFile: string, opts: AgentOptions): string {
-    // Read prompt from file to avoid shell escaping issues
-    const prompt = readFileSync(promptFile, "utf-8").replace(/"/g, '\\"').replace(/\n/g, " ");
-
-    switch (this.binary) {
-      case "codex":
-        return `codex "${prompt}"`;
-      case "claude":
-        return `claude --print "${prompt}"`;
-      case "opencode":
-        return `opencode "${prompt}"`;
-      default:
-        return `${this.binary} "${prompt}"`;
-    }
+  resume(handle: SessionHandle, followUp: string, opts: AgentOptions) {
+    const cmd = `codex resume ${handle.sessionId}`;
+    return execCmd(cmd, handle.cwd, opts.timeout ?? 300000, opts.verbose ?? false, this.name);
   }
 }
 
 // ------------------------------------------------------------------
-// Agent registry — CLI binaries only, no SDKs
+// Claude Code Agent
+//   start:  claude --session-id <uuid> -p "prompt" --output-format json
+//   resume: claude --resume <session-id> -p "follow-up"
 // ------------------------------------------------------------------
 
-const AGENTS: Array<{ name: string; binary: string; versionFlag?: string }> = [
-  { name: "codex", binary: "codex", versionFlag: "--version" },
-  { name: "claude", binary: "claude", versionFlag: "--version" },
-  { name: "opencode", binary: "opencode", versionFlag: "--version" },
-];
+export class ClaudeAgent implements Agent {
+  name = "claude";
+
+  available(): boolean {
+    try {
+      execSync("claude --version", {
+        encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+        timeout: 10000, windowsHide: true,
+      });
+      return true;
+    } catch { return false; }
+  }
+
+  start(prompt: string, opts: AgentOptions) {
+    const sessionId = randomUUID();
+    const promptFile = writePromptFile(opts.cwd, prompt);
+    const escaped = readFileSync(promptFile, "utf-8").replace(/"/g, '\\"').replace(/\n/g, " ");
+    const parts = [
+      "claude",
+      `--session-id "${sessionId}"`,
+      `--print`,
+      `--output-format json`,
+      `--max-turns 25`,
+    ];
+    if (opts.systemPrompt) {
+      const spFile = writePromptFile(opts.cwd, opts.systemPrompt, "_system");
+      parts.push(`--system-prompt-file "${spFile}"`);
+    }
+    parts.push(`"${escaped}"`);
+    const cmd = parts.join(" ");
+    const { output, exitCode } = execCmd(cmd, opts.cwd, opts.timeout ?? 300000, opts.verbose ?? false, this.name);
+    return { handle: { agentName: this.name, sessionId, cwd: opts.cwd }, output, exitCode };
+  }
+
+  resume(handle: SessionHandle, followUp: string, opts: AgentOptions) {
+    const escaped = followUp.replace(/"/g, '\\"').replace(/\n/g, " ");
+    const cmd = `claude --resume "${handle.sessionId}" --print "${escaped}"`;
+    return execCmd(cmd, handle.cwd, opts.timeout ?? 300000, opts.verbose ?? false, this.name);
+  }
+}
+
+// ------------------------------------------------------------------
+// OpenCode Agent
+//   start:  opencode run "prompt"
+//   resume: opencode run --session <id> "follow-up"
+// ------------------------------------------------------------------
+
+export class OpenCodeAgent implements Agent {
+  name = "opencode";
+
+  available(): boolean {
+    try {
+      execSync("opencode --version", {
+        encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+        timeout: 10000, windowsHide: true,
+      });
+      return true;
+    } catch { return false; }
+  }
+
+  start(prompt: string, opts: AgentOptions) {
+    const sessionId = randomUUID();
+    const promptFile = writePromptFile(opts.cwd, prompt);
+    const escaped = readFileSync(promptFile, "utf-8").replace(/"/g, '\\"').replace(/\n/g, " ");
+    const cmd = `opencode run "${escaped}"`;
+    const { output, exitCode } = execCmd(cmd, opts.cwd, opts.timeout ?? 300000, opts.verbose ?? false, this.name);
+
+    // Try to capture session ID from opencode output
+    const match = output.match(/session[:\s]+([0-9a-zA-Z_-]+)/i);
+    const realId = match?.[1] ?? sessionId;
+
+    return { handle: { agentName: this.name, sessionId: realId, cwd: opts.cwd }, output, exitCode };
+  }
+
+  resume(handle: SessionHandle, followUp: string, opts: AgentOptions) {
+    const escaped = followUp.replace(/"/g, '\\"').replace(/\n/g, " ");
+    const cmd = `opencode run --session "${handle.sessionId}" "${escaped}"`;
+    return execCmd(cmd, handle.cwd, opts.timeout ?? 300000, opts.verbose ?? false, this.name);
+  }
+}
+
+// ------------------------------------------------------------------
+// Agent registry
+// ------------------------------------------------------------------
 
 export function getAgents(): Agent[] {
-  return AGENTS.map((a) => new CliAgent(a.name, a.binary, a.versionFlag));
+  return [new CodexAgent(), new ClaudeAgent(), new OpenCodeAgent()];
 }
 
 export function getAvailableAgents(): Agent[] {
