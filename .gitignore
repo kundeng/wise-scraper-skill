@@ -3,6 +3,14 @@ dist/
 *.tmp
 .tmp_eval.js
 AGENTS.md
-.kiro/
 docs/
-tests/
+!.kiro/
+!.kiro/**
+tests/*
+!tests/package.json
+!tests/promptfooconfig.yaml
+!tests/src/
+!tests/src/**
+!tests/harness/
+tests/harness/node_modules/
+tests/harness/dist/
