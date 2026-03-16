@@ -6,7 +6,7 @@
  * agent-browser, and outputs intermediate JSONL + optional assembled output.
  *
  * Usage:
- *   node dist/run.js <profile.yaml> [--output-dir ./output] [--hooks ./hooks.js] [-v]
+ *   node dist/run.js <profile.yaml> [--output-dir ./output] [--hooks ./hooks.js] [--set k=v] [--config extra.yaml] [-v] [--dry-run]
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
@@ -17,6 +17,7 @@ import { Browser } from "./browser.js";
 import { Engine } from "./engine.js";
 import { HookRegistry } from "./hooks.js";
 import { assembleMarkdown, assembleCsv } from "./processing.js";
+import { loadConfig } from "./config.js";
 import type {
   Deployment,
   Resource,
@@ -133,61 +134,41 @@ function flatToSchema(flat: Record<string, unknown>): Deployment {
 }
 
 // ------------------------------------------------------------------
-// CLI argument parsing
-// ------------------------------------------------------------------
-
-interface CliArgs {
-  profile: string | null;
-  outputDir: string;
-  hooks: string | null;
-  verbose: boolean;
-}
-
-function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { profile: null, outputDir: "./output", hooks: null, verbose: false };
-  const positional: string[] = [];
-
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--output-dir" || argv[i] === "-o") {
-      args.outputDir = argv[++i];
-    } else if (argv[i] === "--hooks") {
-      args.hooks = argv[++i];
-    } else if (argv[i] === "-v" || argv[i] === "--verbose") {
-      args.verbose = true;
-    } else if (!argv[i].startsWith("-")) {
-      positional.push(argv[i]);
-    }
-  }
-  args.profile = positional[0] ?? null;
-  return args;
-}
-
-// ------------------------------------------------------------------
 // Main
 // ------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const config = loadConfig(process.argv.slice(2));
+  const { runner, profile: profileData } = config;
 
-  if (!args.profile) {
-    console.error("Usage: node dist/run.js <profile.yaml> [--output-dir ./output] [--hooks ./hooks.js] [-v]");
+  if (!runner.profile) {
+    console.error("Usage: node dist/run.js <profile.yaml> [--output-dir ./output] [--hooks ./hooks.js] [--set k=v] [--config extra.yaml] [-v] [--dry-run]");
     process.exit(1);
   }
 
-  const profilePath = resolve(args.profile);
+  const profilePath = resolve(runner.profile);
   console.log(`[main] Loading profile: ${profilePath}`);
   const profile = loadProfile(profilePath);
   const resources = profile.resources ?? [];
   console.log(`[main] Profile: ${profile.name ?? "?"} (${resources.length} resources)`);
 
-  const outDir = resolve(args.outputDir);
+  if (runner.dryRun) {
+    console.log("[main] Dry run — config resolved successfully:");
+    console.log(JSON.stringify({ runner, inputs: config.inputs }, null, 2));
+    return;
+  }
+
+  const outDir = resolve(runner.outputDir);
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
   const hookRegistry = new HookRegistry();
   if (profile.hooks) hookRegistry.loadFromConfig(profile.hooks);
-  if (args.hooks) await hookRegistry.loadFromModule(resolve(args.hooks));
+  if (runner.hooks) await hookRegistry.loadFromModule(resolve(runner.hooks));
 
-  const browser = new Browser();
+  const browser = new Browser({
+    timeoutMs: runner.timeout,
+    retries: runner.retries,
+  });
 
   try {
     const allRecords: ExtractedRecord[] = [];
@@ -205,8 +186,8 @@ async function main(): Promise<void> {
     const finalRecords = ctx.records;
 
     // Determine output format
-    const outputConfig = profile._output ?? { format: "jsonl", file: profile.name ?? "output" };
-    const fmt = outputConfig.format ?? "jsonl";
+    const outputConfig = profile._output ?? { format: runner.outputFormat, file: profile.name ?? "output" };
+    const fmt = outputConfig.format ?? runner.outputFormat ?? "jsonl";
     let baseName = outputConfig.file ?? profile.name ?? "output";
     if (baseName.includes(".")) baseName = baseName.split(".").slice(0, -1).join(".");
 
@@ -226,7 +207,7 @@ async function main(): Promise<void> {
       records: finalRecords,
       outputDir: outDir,
       profile,
-    });
+    } as HookContext);
 
     console.log(`\n=== Done: ${finalRecords.length} total records ===`);
   } finally {

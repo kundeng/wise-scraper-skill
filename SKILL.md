@@ -1,132 +1,78 @@
 ---
 name: wise-scraper
-description: "Structured web scraping for AI coders: explore first, then exploit with shipped templates, runner, hooks, or task-local code."
+description: "Structured web scraping for AI coders: explore, then exploit with shipped templates, runner, and hooks."
 ---
 
 # WISE Scraper
 
-## Overview
-
-WISE teaches an AI coding agent how to do **structured, repeatable web scraping** for JS-rendered sites in a disciplined way.
-
-The goal is to produce a **working scraping project** for the target site. In most cases that project should start from the shipped WISE assets and then copy, adapt, and extend them as needed:
-
-- YAML templates as the starting exploit shape
-- the shipped TypeScript runner as the execution backbone
-- reference modules, hooks, helper scripts, and post-processing code copied over and tweaked for the task
-
-The workflow matters because it leads to that project:
+WISE teaches an AI coding agent **structured, repeatable web scraping** for JS-rendered sites. The goal is a **working scraping project** built from shipped WISE assets.
 
 ```
-Explore -> Evidence -> Choose exploit tier -> Exploit -> JSONL intermediate -> Assemble final output
+Explore → Evidence → Choose tier → Exploit → JSONL intermediate → Assemble
 ```
 
-This skill covers the full path from interactive exploration to deterministic exploitation:
+1. **Explore** — inspect the live site with `agent-browser`, test selectors, map navigation
+2. **Evidence** — record selector proof and DOM observations before designing the exploit
+3. **Choose tier** — prefer shipped plumbing, escalate only when justified
+4. **Exploit** — assemble a profile from template fragments, run it, extend with hooks or task-local code
+5. **Process** — JSONL is the intermediate truth; assemble markdown/CSV/JSON later
 
-1. **Explore** - inspect the live site with `agent-browser`, test selectors, and map navigation/state
-2. **Evidence** - record DOM observations, selector proof, and interaction proof before designing the exploit
-3. **Choose project shape** - prefer shipped templates and the reference runner, then copy/adapt the missing pieces
-4. **Exploit** - build the scraping project through declarative profiles, hooks, helper scripts, or task-local code
-5. **Process** - keep JSONL as the intermediate truth and assemble markdown, CSV, or JSON later
-
-Use this skill when the agent needs to scrape dynamic sites, paginate, click through UI state, combine filters, or turn page captures into structured, repeatable outputs.
-
-Do **not** use this skill when a stable public API/export already solves the task, or when a one-off static `curl`/HTML parse is clearly enough.
+Use when: JS-rendered sites, pagination, UI state, filter combos, structured repeatable output.
+Do not use when: a stable API/export exists, or static `curl` is clearly enough.
 
 ## Agent Contract
 
-The agent's job is to create a **working scraping project** while staying as close as possible to the shipped WISE plumbing.
+1. **Explore first.** Use `agent-browser` to inspect DOM, interactions, and state before writing any profile.
+2. **Show evidence.** Record selectors, DOM snippets, or snapshots before writing project code.
+3. **Assemble from fragments.** Templates in `templates/*.yaml` are composable fragments — pick the pieces that match (pagination, matrix, table, interaction, etc.) and combine them into one profile. They are not a menu of alternatives.
+4. **Start from shipped assets.** Use the runner and reference modules before inventing new structure.
+5. **Copy and adapt deliberately.** Copy, tweak, and extend shipped code to fit the target.
+6. **DOM eval for live extraction.** HTML parsing libraries are for post-processing captured HTML only.
 
-### Required behavior
+### Exploit Tiers
 
-1. **Explore first.** Use `agent-browser` to inspect the live DOM, interactions, pagination, and state transitions before designing the exploit path.
-2. **Show evidence.** Record selectors, DOM snippets, snapshots, or concrete observations before writing profiles or project code.
-3. **Start from shipped assets.** Use the closest templates, runner modules, and reference code before inventing new structure from scratch.
-4. **Copy and adapt deliberately.** It is expected that the agent will copy, tweak, and extend the shipped code to fit the target site.
-5. **Use DOM eval for live-page extraction.** HTML parsing libraries are for post-extraction processing of captured HTML, not for observing the live rendered page.
+| Tier | When | What |
+|---|---|---|
+| 1 | Target fits declarative flow | Assemble template fragments + shipped runner |
+| 2 | Target needs adaptation | Copy/adapt runner modules, hooks, helpers, or AI adapter into task project |
+| 3 | Target exceeds reference boundary | Bespoke project, carrying WISE discipline |
 
-### Default project-building order
+When escalating, explain why the simpler tier is insufficient.
 
-1. **Tier 1: Shipped templates + shipped runner**
-   Use `templates/*.yaml` and `references/runner/` mostly as-is.
-2. **Tier 2: Shipped templates + copied/adapted WISE code**
-   Copy runner modules, hooks, post-processing, or helper code into the task project and tweak them for the target.
-3. **Tier 3: Bespoke project informed by WISE**
-   Build a more custom scraper project only when the target cannot be expressed cleanly by adapting the shipped assets.
+### Runner Boundary
 
-When escalating tiers, explain why the lower-copy/lower-complexity path is insufficient.
+The runner handles: YAML profile interpretation, `agent-browser` driving, DOM-eval extraction, selectors, interactions, pagination, matrix, post-processing.
 
-## Architecture Boundary
+The agent may extend beyond the runner: hooks, helper scripts, chaining glue, site-specific assembly, AI-assisted extraction. If a capability isn't native in the runner, the agent adds it to the project — the skill teaches how.
 
-### What the reference runner is responsible for
+### AI Adapter (optional)
 
-- Interpreting declarative YAML profiles
-- Driving `agent-browser`
-- Performing deterministic DOM-eval extraction
-- Handling common patterns like selectors, interactions, pagination, matrix expansion, and post-processing
-
-### What the AI coding agent may do in the final project
-
-- Copy runner modules into a task-local project and tweak them
-- Add hook modules and task-local helper scripts
-- Add site-specific assembly and cleanup logic
-- Add chaining glue between resources or artifacts
-- Add AI-assisted extraction or enrichment when deterministic selectors are insufficient
-- Build a more custom task-local project if the target exceeds the reference runner's natural boundary
-
-If a capability is not fully native in the runner today, that is acceptable **if the skill teaches the agent how to add it to the project by adapting the shipped code or surrounding it with task-local code**, rather than pretending the runner already does it natively.
-
-## AI Pattern
-
-AI-assisted extraction/enrichment is **optional** and should be introduced only when ordinary DOM extraction, hooks, and post-processing are not enough.
-
-Use an **AI adapter** pattern:
-
-- The runner/project may call a local AI CLI binary during exploit-time
-- The adapter should be vendor-neutral at the interface level
-- The backend may be `codex`, `claude`, or another compatible CLI available in the environment
-- The agent should prefer whichever backend is installed and reliable, with fallbacks when possible
-
-Recommended adapter contract:
-
-- `input`: instructions, page/context payload, and desired output schema
-- `output`: structured JSON or markdown that can be validated downstream
-- `policy`: only invoke AI when the target requires semantic extraction, fuzzy normalization, or enrichment beyond durable selectors
-
-The skill should not force an AI dependency into every scrape. The agent decides if AI is needed.
+Introduce AI only when DOM extraction + hooks + post-processing are insufficient. Use a vendor-neutral CLI adapter (`codex`, `claude`, or another local binary). See `references/ai-adapter.md` for the full pattern.
 
 ## Working Rules
 
-- **Templates first.** Start from the closest `templates/*.yaml` and adapt it before inventing a new structure.
-- **Runner first.** Start from `references/runner/`, then copy/adapt modules when the task needs project-local changes.
-- **Header-based tables.** Prefer header mapping over positional assumptions.
-- **Sort verification required.** After sort interactions, verify the state changed via DOM evidence or explicit checks.
-- **Avoid ambiguous clicks.** Scope by CSS/role/context; do not rely on fragile raw-text clicks when multiple matches exist.
-- **Keep JSONL as the intermediate truth.** Final markdown/CSV/JSON assembly can happen later.
+- **Assemble from template fragments** — combine pieces, don't pick one template
+- **Header-based table mapping** — not positional
+- **Sort verification required** — verify state changed after sort interactions
+- **Avoid ambiguous clicks** — scope by CSS/role/context
+- **JSONL is intermediate truth** — assemble final formats later
 
-## Quick Navigation
+## Quick Reference
 
-- `references/schema.cue`: profile schema
-- `references/field-guide.md`: plain-English field guide
-- `references/ai-adapter.md`: optional exploit-time AI adapter pattern
-- `references/runner/src/`: reference runner and extension points
-- `templates/*.yaml`: preferred starting points
-- `examples/overview.md`: shipped examples and what they demonstrate
-- `tests/harness/`: agent-behavior evaluation harness
-
-## How to Decide the Path
-
-- If selectors and interactions are straightforward, stay in Tier 1.
-- If the scrape needs custom cleanup, orchestration, auth setup, copied/tweaked modules, or exploit-time AI, move to Tier 2.
-- If the target has unusual workflows, heavy statefulness, or needs generated project code, move to Tier 3.
-
-A good WISE outcome is a **working scraping project** that reuses the shipped WISE assets wherever practical, adapts them where necessary, and only goes fully bespoke when justified.
+| Path | Purpose |
+|---|---|
+| `references/schema.cue` | Profile schema |
+| `references/field-guide.md` | Plain-English field guide |
+| `references/guide.md` | Full usage guide, config, hooks, CLI |
+| `references/ai-adapter.md` | Optional AI adapter pattern |
+| `references/runner/src/` | Reference runner source |
+| `templates/*.yaml` | Composable profile fragments |
+| `examples/overview.md` | Shipped examples |
 
 ## Common Failure Modes
 
 - Designing the exploit before collecting exploration evidence
-- Jumping straight to bespoke code when a template would work
-- Treating the runner as either mandatory for everything or useless too early
+- Jumping to bespoke code when template fragments would work
+- Treating the runner as mandatory for everything or useless too early
 - Using HTML parsing on the live page instead of DOM eval
-- Reaching for AI by default instead of only when selectors/plumbing run out
-- Documenting extension paths as built-in runner guarantees
+- Reaching for AI when selectors and plumbing are sufficient

@@ -22,6 +22,7 @@ import {
   getAvailableAgents,
   type Agent,
   type AgentResult,
+  type AgentOptions,
 } from "./agents.js";
 import { scenarios, getScenario, type Scenario } from "./scenarios.js";
 
@@ -98,13 +99,13 @@ RULES:
 // Scenario runner
 // ------------------------------------------------------------------
 
-async function runScenario(
+function runScenario(
   agent: Agent,
   scenario: Scenario,
   skillDir: string,
   outputDir: string,
   verbose: boolean,
-): Promise<AgentResult> {
+): AgentResult {
   const scenarioDir = resolve(outputDir, `${agent.name}_${scenario.id}`);
   if (!existsSync(scenarioDir)) mkdirSync(scenarioDir, { recursive: true });
 
@@ -113,10 +114,9 @@ async function runScenario(
 
   const systemPrompt = buildSystemPrompt(skillDir);
 
-  const result = await agent.run(scenario.prompt, {
+  const result = agent.run(scenario.prompt, {
     cwd: scenarioDir,
     systemPrompt,
-    maxTurns: 20,
     timeout: scenario.timeoutSeconds * 1000,
     verbose,
   });
@@ -294,10 +294,10 @@ async function main(): Promise<void> {
 
   // --check: show available agents
   if (args.check) {
-    console.log("Checking agent availability...\n");
+    console.log("Checking agent CLI availability...\n");
     const allAgents = getAgents();
     for (const agent of allAgents) {
-      const ok = await agent.available();
+      const ok = agent.available();
       console.log(`  ${ok ? "✓" : "✗"} ${agent.name}`);
     }
     return;
@@ -306,17 +306,14 @@ async function main(): Promise<void> {
   // Determine which agents to test
   let agents: Agent[];
   if (args.agent === "all") {
-    agents = await getAvailableAgents();
+    agents = getAvailableAgents();
     if (agents.length === 0) {
-      console.error("No agents available. Install one of: @openai/codex-sdk, @anthropic-ai/claude-code, @opencode-ai/sdk");
-      console.error("Or ensure codex/claude/opencode CLI is on your PATH.");
+      console.error("No agents available. Ensure codex, claude, or opencode CLI is on your PATH.");
       process.exit(1);
     }
   } else {
     const allAgents = getAgents();
-    agents = allAgents.filter((a) =>
-      a.name.includes(args.agent) || a.name === args.agent
-    );
+    agents = allAgents.filter((a) => a.name === args.agent);
     if (agents.length === 0) {
       console.error(`Agent '${args.agent}' not found. Available: ${allAgents.map((a) => a.name).join(", ")}`);
       process.exit(1);
@@ -351,7 +348,7 @@ async function main(): Promise<void> {
   for (const scenario of targetScenarios) {
     console.log(`\n--- Scenario: ${scenario.name} (${scenario.complexity}) ---`);
     for (const agent of agents) {
-      const ok = await agent.available();
+      const ok = agent.available();
       if (!ok) {
         console.log(`  [${agent.name}] SKIP — not available`);
         results.push({
@@ -362,14 +359,13 @@ async function main(): Promise<void> {
           filesCreated: [],
           filesModified: [],
           duration_ms: 0,
-          turns: 0,
           error: "Agent not available",
         });
         continue;
       }
 
       try {
-        const result = await runScenario(agent, scenario, args.skillDir, outDir, args.verbose);
+        const result = runScenario(agent, scenario, args.skillDir, outDir, args.verbose);
         results.push(result);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -382,7 +378,6 @@ async function main(): Promise<void> {
           filesCreated: [],
           filesModified: [],
           duration_ms: 0,
-          turns: 0,
           error: msg,
         });
       }
