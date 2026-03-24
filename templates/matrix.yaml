@@ -1,0 +1,23 @@
+selectors:
+  - name: search_matrix
+    type: matrix
+    parents: [root]
+    multiple: true
+    matrix:
+      auto_discover: true
+      axes:
+        - action: type
+          selector: "#search-box"
+          values: ["laptop", "tablet"]
+        - action: select
+          selector: "#brand-dropdown"
+          values: auto
+        - action: checkbox
+          selector: "#in-stock"
+          values: []
+
+  - name: search_results
+    type: element
+    selector: ".result-row"
+    multiple: true
+    parents: [search_matrix]

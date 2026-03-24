@@ -1,0 +1,43 @@
+selectors:
+  - name: color_variant
+    type: element-click
+    selector: "div.product-wrapper"
+    multiple: true
+    interaction:
+      - type: click
+        target: { css: "select option:not(:has-text('Select'))" }
+        click_type: clickOnce
+        click_action_type: real
+        click_element_uniqueness_type: uniqueCSSSelector
+        discard_initial_elements: discard-when-click-element-exists
+        delay_ms: 2000
+    parents: [root]
+
+  - name: hdd_variation
+    type: element-click
+    selector: "_parent_"
+    multiple: true
+    interaction:
+      - type: click
+        target: { css: "button:not([disabled])" }
+        click_type: clickOnce
+        click_action_type: real
+        click_element_uniqueness_type: uniqueText
+        discard_initial_elements: do-not-discard
+        delay_ms: 2000
+    parents: [color_variant]
+
+  - name: name
+    type: text
+    selector: "h4[itemprop='name']"
+    parents: [hdd_variation]
+
+  - name: price
+    type: text
+    selector: "h4[itemprop='offers']"
+    parents: [hdd_variation]
+
+  - name: hdd_size
+    type: text
+    selector: "button.active"
+    parents: [hdd_variation]

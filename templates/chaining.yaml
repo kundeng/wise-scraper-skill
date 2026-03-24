@@ -1,0 +1,34 @@
+deployment:
+  resources:
+    - name: categories
+      entry: { url: "https://example.com/", root: root }
+      selectors:
+        - name: category_link
+          type: link
+          selector: "a.category-link"
+          multiple: true
+          parents: [root]
+      outputs:
+        - artifact: category_urls
+          from: category_link
+
+    - name: products
+      inputs: [{ name: input, artifact: category_urls }]
+      entry: { url: { artifact: category_urls }, root: root }
+      selectors:
+        - name: product_card
+          type: element
+          selector: ".product-card"
+          multiple: true
+          parents: [root]
+        - name: name
+          type: text
+          selector: ".title"
+          parents: [product_card]
+        - name: price
+          type: text
+          selector: ".price"
+          parents: [product_card]
+      outputs:
+        - artifact: product_rows
+          from: product_card

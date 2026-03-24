@@ -1,0 +1,19 @@
+selectors:
+  - name: results_table
+    type: element
+    parents: [root]
+    context:
+      table_headers: ["Name", "Score", "Rank"]
+    selector: "table.results"
+    extract:
+      - type: table
+        name: results
+        selector: "table.results"
+        header_row: 0
+        columns:
+          - name: name
+            header: "Name"
+          - name: score
+            header: "Score"
+          - name: rank
+            header: "Rank"
