@@ -1,6 +1,9 @@
 ---
 name: wise-scraper
 description: "Structured web scraping for AI coders: explore, then exploit with shipped templates, runner, and hooks."
+metadata:
+  author: kundeng
+  version: "1.0.0"
 ---
 
 # WISE Scraper
